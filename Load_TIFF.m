@@ -1,4 +1,4 @@
-function [data] = Load_TIFF(filepath, framerange, beginend)
+function [data] = LoadTIFF(filepath, framerange, beginend)
 %	Loads all frames from a *.tif or *.mptiff file and stores into a data matrix.
 % 	-----------------------------------------------------------------------------	
 % 	Arugment Definitions:
@@ -6,7 +6,6 @@ function [data] = Load_TIFF(filepath, framerange, beginend)
 % 
 % 	> framerange:	[#] The frames (in order) to look at
 % 					(i,j) The beginning and end frames (requires beginend = true)
-%					(optional) The default will take all available frames, ascending
 % 
 % 	> beginend:		(T/F) (optional) if framerange has only two elements,
 % 		interprets those two elements as the beginning and end of the framerange
@@ -16,39 +15,33 @@ function [data] = Load_TIFF(filepath, framerange, beginend)
 % 	< data:			[x,y,f] The frame data stored in filepath.
 	
 	%% Argument Defaults %%
-	if(nargin < 2), framerange = 0;	end		% By default, get all the frames %
 	if(nargin < 3), beginend = false; end	% By default, only select frames given %
 
 	%% Initialize %%
+	% Make the frng (framerange) array %
+	if(length(framerange) == 2 && beginend)
+		% The frames specified are beginning & end %
+		
+		% Determine if the frames are to be read backwards or not %
+		if(min(framerange) == framerange(1))
+			% Properly ordered %
+			frng = framerange(1):framerange(2); 
+		else
+			% Read in reverse %
+			frng = framerange(2):-1:framerange(1);
+		end
+	else
+		% Pick the specific frames listed, even if only one %
+		frng = framerange;
+	end
+	
 	% Determine the number of available frames to read from %
 	info = imfinfo(filepath);
 	numframes = numel(info);
 	
-	% Make the frng (framerange) array %
-	if(framerange == 0)
-		% Obtain all frames from the image %
-		frng = 1:numframes;
-	elseif(length(framerange) == 2 && beginend)
-		% The frames specified are beginning & end %
-		frng = framerange(1):framerange(2);
-		
-		% Check to make sure that they're within the bounds %
-		if(any(framerange > numframes) || any(framerange < 1))
-			% Truncate to the ends of the file %
-			disp(['Selected frames are out of bounds for this file.  ', ...
-				'Truncating to the ends of the file...']);
-			
-			frng = max(min(frng), 1) : min(max(frng), numframes);
-		end
-		
-		% Determine if the frames are to be read backwards or not. If so, flip frng %
-		if(framerange(1) > framerange(2)), frng = flip(frng); end
-	else
-		% Pick the specific frames listed, in that order, even if only one %
-		frng = framerange;
-		
-		% Check if there's anything out of bounds and remove them %
-		frng(any(frng > numframes) || any(frng < 1)) = [];
+	% Check to make sure that no frame in frng is out of bounds %
+	if(any(frng > numframes) || any(frng < 1))
+		error('Selected frames are out of bounds for this file');
 	end
 	
 	% Allocate the appropriate memory for the data %
