@@ -1,451 +1,594 @@
 classdef Particle < handle
-% Class that contains methods and infomration about each particle in the image, used
-% primarily as an object for modular spectrum fitting.
+% A dynamic class for handling identified particles.
 
+%% CONSTANT VARIABLES %%
 properties(Constant)
-	% Selection boxes %
-	FILT_RAD = 10	% Selection window radius (x & y) %
-	SPEC_RAD = 107	% Spectrum window radius (x) - uses WIN_RAD for (y) %
-	SPEC_OFF = 330	% 350 px for 1200x1200, 713 px for 2048x2048 %
+	% Physical Constants %
+	HC = (6.626E-34 * 2.998E8) * (1E9/1.602E-19);	% hw (ev) = hc / lambda (nm) %
 	
 	% Spectral calibration %
 	CAL_SLOPE = 1.927	% Calibration slope (nm) %
 	CAL_INTER = -1.7313 % Calibration intercept (nm) %
-end
-properties
-	pos		% Position of the particle %
-	spos	% Position of the center of the particle's spectrum %
 	
-	spec	% Spectrum struct of plots (selection, background, signal, sum(fit)) %
-	fits	% Individual spectrum fits %
-	params	% Individual spectrum fit parameters [A, x_0, Gamma] %
-	grids	% The eV and nm grids for this fit %
+	% Spectral bounds %
+	BND_EV = [1.5, 3.0]								% Bounds in eV %
+	BND_NM = Particle.HC ./ flip(Particle.BND_EV)	% Bounds in nm %
+	BND_PX = Particle.S_NM2PX(Particle.BND_NM);		% Bounds in px (not offset) %
 	
-	best_fit % The x_0 of the fit that best aligns with what it should? %
-	best_params
+	% Spectral ranges %
+	RNG_PX = (round(Particle.BND_PX(1)):round(Particle.BND_PX(2)))';
+	RNG_NM = Particle.S_PX2NM(Particle.RNG_PX);
+	RNG_EV = Particle.HC ./ Particle.RNG_NM;
 end
 
+%% STATIC VARIABLES %%
+%	> pltopt:	[bool]	Array of boolean values to determine various plotting options
+%		(show_ev, show_bg, show_sig)
+%
+%	> fitval:	[#]		Array of numbers corresponding to the values of the fitting
+%		parameter sliders in MainWin (fit_snr, fit_lor, fit_itr)
+%
+%	> imgdim:	[#]		Array of numbers corresponding to the sizes of the various 
+%		images associated with this Particle (peak_x, peak_y, spec_x, spec_y)
 methods(Static)
-	function Select(parent)
-		%% Initialization %%
-		% Get the rectangular region of interest specified by the user %
-		roi = round(getrect(parent.UserData.ax_img));
-
-		% Find the region of interest in the image %
-		xrng = roi(2) + (1:roi(4));
-		yrng = roi(1) + (1:roi(3));
-		roi_img = parent.UserData.img(xrng, yrng);
+	function [value] = pltopt(val, write)	% Plotting Options %
+		persistent pltopt;
 		
-		% Build a Gaussian filter %
-		filt_rad = 6;	% Filter Radius %
-		filt_sig = 2;	% Gaussian standard deviation %
-		[xx, yy] = meshgrid(-filt_rad:filt_rad, -filt_rad:filt_rad);
-		filt = exp(-(xx.^2 + yy.^2)/(2*filt_sig^2));	% Build a Gaussian %
-		filt = filt ./ sum(filt(:));					% Normalize the filter %
-		Filt = fft2(filt, size(roi_img,1), size(roi_img,2));	% Zero-pad the fft %
-		
-		% Smooth the image with our filter - this denoises it enough to perform
-		% elementary peakfinding - which is where our particles are located!
-		filt_roi = ifft2(fft2(roi_img) .* Filt);
-		
-		%% Peakfinding %%
-		% Build the derivative filters in x and y and apply them forward & backward %
-		dx = diff(filt_roi, 1, 1) > 0;
-		dy = diff(filt_roi, 1, 2) > 0;
-		
-		dx_0 = zeros(size(filt_roi(1,:)));	% Zero padding for size reasons %
-		dy_0 = zeros(size(filt_roi(:,1)));
-		
-		roi_dx = [dx_0; dx] & [1-dx; dx_0];	% Forward & Backward %
-		roi_dy = [dy_0, dy] & [1-dy, dy_0];
-		
-		% Threshold based on two standard deviations above the nonzero value mean -
-		% unfortunately this means that we will need to take a larger sample around
-		% the particle of interest (if there is only one) in order to drive down the
-		% mean and standard deviation.  Remember, the particle has to be in the > 95%
-		% regime!
-		thresh = mean(filt_roi(filt_roi > 0)) + 2*std(filt_roi(filt_roi > 0));
-		
-		% Check if this threshold is too close to the maximum %
-		if(thresh > 0.75*max(filt_roi(:)))	% > 75% picked arbitrarily %
-			% We probably picked up only noise, throw everything away %
-			thresh = max(filt_roi(:));
-		end
-		roi_th = (filt_roi > thresh);
-		
-		% Combine all of our filtering together! %
-		peak_roi = filt_roi .* (roi_dx & roi_dy & roi_th);
-		
-		% Find the appropriate peaks and their (x,y) coordinates in the selection %
-		peaks = find(peak_roi);
-		[px, py] = ind2sub(size(peak_roi), peaks);
-		
-		%% Visualization and Data storage %%
-		% Clear the boxes from before, if there were any - also tell the user how
-		% many particles we've found, if any...
-		Show.Image(parent.UserData.ax_img, parent.UserData.img, ...
-			join(["Original Image | Particles Located:", length(peaks)]));
-		
-		% Store all the new particles in the region of interest into the UserData %
-		parent.UserData.fp_str = cell(1, length(peaks));
-		
-		for p = 1:length(peaks)
-			% Make a new Particle %
-			part = Particle;
-			
-			% Pass in the particle and spectrum positions %
-			part.pos =	[py(p) + roi(1), px(p) + roi(2)] - filt_rad;
-			part.spos = part.pos + [part.SPEC_OFF, 0];		% Don't forget to shift %
-			% The reason we subtract filt_rad from both coordinates in part.pos is
-			% because when we convolve with a filter, the result shifts right by the 
-			% ~ half the length of the filter.  We correct for this to put the peak
-			% in the center.
-			
-			% Append the particle to the Particles list %
-			if(~isfield(parent.UserData, 'Particles') || p == 1)
-				% Create a new particle list %
-				parent.UserData.Particles = part;
-			else
-				parent.UserData.Particles(end+1) = part;
+		% Change behavior based on the number of input arguments - 1D arrays only %
+		if(nargin == 0)				% Spit out the entire array %
+			value = pltopt;
+		elseif(nargin == 1)			% Read out the specific index given by val % 
+			value = pltopt(val);
+		else
+			% Check if 'write' is a boolean %
+			if(islogical(write))	% Write to the whole array %
+				pltopt = val;
+			else					% Write to just the indices given in 'write' %
+				prev = Particle.pltopt;
+				prev(write) = val;
+				pltopt = prev;
 			end
-			
-			% Draw a box around the particle and its spectrum %
-			Show.Box(parent.UserData.ax_img, part);
-			
-			% Update the listbox in MainWin with the found particle %
-			parent.UserData.fp_str{p} = join(["Particle", p, "- (     )"]);
-			
-			% Start creating list entries in MainWin %
-			lbx_fndpart = findobj(parent.Children, 'flat', 'Tag', "lbx: Found Particles");
-			lbx_fndpart.Enable = 'on';
-			lbx_fndpart.String = parent.UserData.fp_str;
-			lbx_fndpart.Value = 1;
-			drawnow limitrate;
 		end
+	end
+	function [value] = fitval(val, write)	% Fitting Options %
+		persistent fitval;
 		
-		%% MainWin Update %%
-		% Make the 'Fit Selected Particles' button enabled %
-		but_fitpart = findobj(parent.Children, 'flat', 'Tag', 'Fit Selected Particles');
-		but_fitpart.Enable = 'on';
+		% Change behavior based on the number of input arguments - 1D arrays only %
+		if(nargin == 0)				% Spit out the entire array %
+			value = fitval;
+		elseif(nargin == 1)			% Read out the specific index given by val % 
+			value = fitval(val);
+		else
+			% Check if 'write' is a boolean %
+			if(islogical(write))	% Write to the whole array %
+				fitval = val;
+			else					% Write to just the indices given in 'write' %
+				prev = Particle.fitval;
+				prev(write) = val;
+				fitval = prev;
+			end
+		end
+	end
+	function [value] = imgdim(val, write)	% Image Dimensions %
+		persistent imgdim;
 		
-		% Display the first spectrum %
-		img = parent.UserData.img;
-		part = parent.UserData.Particles(1);
-		spec_img = img(part.spos(2) + (-Particle.FILT_RAD:Particle.FILT_RAD), ...
-					   part.spos(1) + (-Particle.SPEC_RAD:Particle.SPEC_RAD));
-		
-		Show.Image(parent.UserData.ax_spec, spec_img, ...
-			join(["Spectrum Image for Particle", 1]));
-		axis(parent.UserData.ax_spec, 'normal');
-		
-		% Change 'Spec Plot' to false %
-		tog_specplt = findobj(parent.Children, 'flat', 'Tag', "Spec Plot");
-		tog_specplt.Value = false;
-		tog_specplt.UserData.prev_idx = 1;
-		parent.UserData.specplt = false;
+		% Change behavior based on the number of input arguments - 1D arrays only %
+		if(nargin == 0)					% Spit out the entire array %
+			value = imgdim;
+		elseif(nargin < 2 || ~write)	% Read out the specific index given by val % 
+			value = imgdim(val);
+		elseif(write)					% Write to the value
+			imgdim = val;
+		end
 	end
 	
-	function FitSelected(parent)
-		%% CONSTANTS %%
-		HC = (6.626E-34 * 2.998E8) * (1E9/1.602E-19);	% For hw (eV) = hc / lambda (nm) %
-		EV_RNG = [1.0, 3.0];			% in eV %
-		NM_RNG = HC ./ flip(EV_RNG);	% in nm - flipped so (1) < (2) %
+	%% REFRESH %%
+	function REFRESH()
+	% Clears all static variables of their values and prepares the class for use
+	
+		%% Refresh Values %%
+		Particle.imgdim([], true);		% Image Dimensions %
 		
-		%% Initialization %%
-		% Copy in the image from MainWin %
-		img = parent.UserData.img;
-		
-		% Other parameters to pull from MainWin: %
-		% sel_sig: Standard deviation of selection filter %
-		% sel_thr: Threshold of maximum to determine if something is bad %
-		% fit_lor: # of Lorentzians to fit %
-		% fit_itr: # of iterations to perform when correcting fits %
-		[sel_sig, sel_thr, fit_lor, fit_itr] = parent.UserData.FitParams{:};
-		
-		% Remember that sel_thr is in percent! %
-		sel_thr = sel_thr / 100;
-		
-		% Prepare the selection and background windows %
-		xgrid = -Particle.SPEC_RAD:Particle.SPEC_RAD;	% Grids %
-		ygrid = -Particle.FILT_RAD:Particle.FILT_RAD;
-		
-		sel_filt = exp(-(ygrid.^2)/(2*sel_sig^2));	% Constrcut a Gaussian filter %
-		bg_filt = 1 - sel_filt;
-		
-		sel_filt = sel_filt / sum(sel_filt);		% Normalize %
-		bg_filt = bg_filt / sum(bg_filt);
-		
-		% Prepare the plotting ranges %
-		nm_off = 382;	% ??? %
-		
-		nm_rng = (NM_RNG - Particle.CAL_INTER) / Particle.CAL_SLOPE;
-		nm_grid = (floor(nm_rng(1)):floor(nm_rng(2))) + nm_off;
-		
-		ev_grid = Particle.CAL_SLOPE * (nm_grid - nm_off) + Particle.CAL_INTER;
-		ev_grid = HC ./ ev_grid;	% Don't forget! %
+		%% Refresh Options %%
+		Particle.pltopt([], true);		% Plotting Options %
+		Particle.fitval([], true);		% Fitting Options %
+	end
+end
 
-		%% Iteration %%
-		% Refresh the listbox %
-		lbx_fndpart = findobj(parent.Children, 'flat', 'Tag', "lbx: Found Particles");
-		lbx_fndpart.Enable = 'on';
-		for p = 1:length(parent.UserData.Particles)
-			parent.UserData.fp_str{p} = join(["Particle", p, "- (     )"]);
+%% DYNAMIC VARIABLES %%
+properties
+	isActive	% (bool)	Determines if this Particle is currently selected %
+	
+	%% Peak %%
+	peak_pos	% (x, y)	Peak position %
+	peak_rng
+	peak_img	% [x, y]	Image at the peak with a small surrounding window %
+
+	%% Spectrum %%
+	spec_pos	% (x, y)	Spectrum position %
+	spec_rng	% (-, +)	Spectrum range (in px) %
+	spec_img	% [x, y]	Image at the spectrum with a small surrounding window %
+	
+	pow_noise % [nm, ev]	Domain
+	spec_plots	% [sel, bg, sig] Various parts of the integrated spectrum % 
+	spec_fits
+	
+	%% Display %%
+	peak_lines	% [line] Array of lines that define the box around the peak image %
+	spec_lines	% [line] Array of lines that define the box around the spectrum img %
+	
+	str
+end
+
+%% DYNAMIC METHODS %%
+methods
+	%%%%%% STILL NEEDS WORK %%%%
+	%% CONSTRUCTOR %%
+	function [obj] = Particle(peak_pos, img)
+		obj.peak_pos = peak_pos;
+		
+		% The window size is encoded in the dimensions of img %
+		filt_rad = size(img, 1);
+		
+		% Make the peak range %
+		obj.peak_rng = (-floor(filt_rad/2):floor(filt_rad/2)) + obj.peak_pos(1);
+		
+		% Then determine how big the spectrum range needs to be and make it %
+		spec_rngpx = round(Particle.S_NM2PX(Particle.BND_NM, obj.peak_pos(1)));
+		obj.spec_rng = (spec_rngpx(1):spec_rngpx(2))';
+		% Get the image chunks %
+		obj.peak_img = img(:,obj.peak_rng);
+		obj.spec_img = img(:,obj.spec_rng);
+		
+		% Write up the listbox string %
+		obj.str = join(["Particle @ (", obj.peak_pos(1), ",", ...
+			obj.peak_pos(2), ")"]);
+	end
+	
+	%% METHODS %%
+	function Fit_Spectrum(this, filt_wgt, pow_noise)
+	% Derives the spectrum plot of this particle by comparing a selection and
+	% background filter applied to the spectrum image using a soft threshold.  It
+	% then calculates the SNR of the spectrum before fitting multiple Lorentzians to
+	% the spectrum plot.  It attempts to use the minimal number of Lorentzians to
+	% accomplish this, and will correct previously fit Lorentizans in an effort to
+	% maximize accuracy.
+	%	------------------------------------------------------------------------
+	%	Argument Definitions:
+	%	> filt_wgt: [filt_sel, filt_bg] A pair of filters (Gaussian and inverse 
+	%		Gaussian) that are applied to the spectrum image in order to perform
+	%		weighted integration.  The first selects regions closer to the middle, 
+	%		while the second selects regions away from the middle.
+	%		
+	%		Yes, I'm very aware that I can subtract the filters and do a single
+	%		operation, however this way we get to see what each of the filters does
+	%		
+	%	> snr:		(#) The Signal to Noise ratio of the observed spectrum.  The SNR
+	%		is calculated by: SNR = E[S^2] / var(N), where S is the background-
+	%		subtracted signal and N is the additive Gaussian noise present in the 
+	%		entire image.  Here we are taking the expected value over the y 
+	%		dimension, thereby giving us a wavelength dependent SNR
+	%
+	%	- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - 
+	%	Implicit Parameters:
+	%	
+
+		%% Filter the Spectrum Images %%
+		% Obtain the two integrations at once using linear algebra %
+		spec_wgt = this.spec_img' * filt_wgt;	% (plot, filter #) %
+		
+		% The signal we're interested in is the soft-threshold between the selected
+		% spectrum and the background spectrum, hereby dubbed the signal spectrum
+		%spec_sig = max(spec_wgt(:,1) - spec_wgt(:,2), 0);
+		spec_sig = spec_wgt(:,1) - spec_wgt(:,2);
+		
+		
+		% Pass these in to the spec_plots %
+		this.spec_plots = [spec_wgt, spec_sig];
+		this.pow_noise = pow_noise;
+		
+		%% Multiple Lorentzian Fitting %%		
+		% Initialize the vector arrays for the fits and the parameters.  Note that
+		% the domain is over the nm range.
+		numfits = Particle.fitval(2);
+		this.spec_fits = Fit.empty;
+		for f = 1:numfits
+			this.spec_fits(f) = Fit(Particle.RNG_NM, 3, f == 1);
 		end
-		lbx_fndpart.String = parent.UserData.fp_str;
-		
-		% For each found particle... %
-		for p = 1:length(parent.UserData.Particles)
-			%% Get the Selection and Background plots %%
-			% Get the image of its spectrum %
-			spec_xrng = parent.UserData.Particles(p).spos(1) + xgrid;
-			spec_yrng = parent.UserData.Particles(p).spos(2) + ygrid;
-			
-			spec_img = img(spec_yrng, spec_xrng);
-			
-			% Truncate the image where the detector is sure to have signal %
-			[spec_trun, bnds] = Particle.TruncateImage(spec_img);
-			
-			% Remember to also truncate the grids as well %
-			this_nm_grid = nm_grid(bnds(1):bnds(2));
-			this_ev_grid = ev_grid(bnds(1):bnds(2));
 
-			% Get the selection plot and the background plots - matrix multiplication
-			% will handle the weighted sum very well.
-			sel_plot = sel_filt * spec_trun;
-			bg_plot = bg_filt * spec_trun;
-			
-			% Get the signal we're interested in using a soft threshold %
-			sig_plot = max(sel_plot - bg_plot, 0);
-			
-			%% Lorentzian Fitting %%
-			fit = zeros([fit_lor, length(sig_plot)]);
-			params = zeros([fit_lor, 3]); % [A, x_0, Gamma] %
-			
-			% Iteration for accuracy %
-			for i = 1:fit_itr
-				for l = 1:fit_lor
-					% Determine if the total fit (except this one) has an issue %
-					fit_prev = sum(fit((1:fit_lor) ~= l,:), 1);
-					[issue, err_plot] = Particle.FitIssue(sig_plot, fit_prev, sel_thr);
-					if(issue)
-						% Re-fit this Lorentzian to the extra data %
-						[fit(l,:), params(l,:)] = Particle.FitLorentzian(err_plot, this_nm_grid);
-					else
-						break;
-					end
-					
-					% Stop if we have a good enough fit with fewer Lorentzians! %
-					if(i > 1)
-						[issue, ~] = Particle.FitIssue(sig_plot, sum(fit(1:l,:), 1), 2*sel_thr);
-						if(~issue)
-							% Set the useless ones to zero so we can discard them %
-							fit(l+1:end,:) = 0;
-							params(l+1:end,1) = 0;
+		% Check if we're only attempting to fit one peak %
+		if(numfits == 1)
+			% Fit one and done %
+			this.spec_fits.Fit_Lorentzian(spec_sig);
+		else
+			% Repeat for the specified number of iterations... %
+			for i = 1:Particle.fitval(3)
+				% Repeat for each Lorentzian involved... %
+				for l = 1:numfits
+					% Get the sum-fit for all *other* Lorentizans %
+					fit_other = sum([this.spec_fits([1:numfits] ~= l).curve], 2);
+
+					% Get the error of fit_other with the raw data %				
+					[issue, fit_err] = Particle.FitIssue(spec_sig, fit_other, ...
+						sqrt(Particle.fitval(1)*pow_noise));
+					if(~issue)
+						if(~this.spec_fits(l).isActive)
+							continue;
+						else
 							break;
 						end
 					end
+
+					% Use the fit error to re-fit this Lorentzian %
+					this.spec_fits(l).Fit_Lorentzian(fit_err);
+
+					% If this fit doesn't really matter too much, nuke it %
+					if(abs(this.spec_fits(l).param(1)) < 2*sqrt(Particle.fitval(1)*pow_noise))
+						this.spec_fits(l).isActive = false;
+						this.spec_fits(l).Refresh();
+					else
+						this.spec_fits(l).isActive = true;
+					end
 				end
 				
-				% Sort the fits based on their peak intensities %
-				[~, sortidx] = sort(params(:,1), 'descend');
-				fit = fit(sortidx, :);
-				params = params(sortidx, :);
+				% If there's only one Lorentzian left, we've already done our best
+				% fit, so break out.
+				if(sum([this.spec_fits.isActive]) == 1), break; end
 			end
 			
-			% Remove the unnecessary Lorentzians %
-			useless_fit = (params(:,1) < 100); % Arbitrary number %
-			fit = fit(~useless_fit, :);
-			params = params(~useless_fit, :);
-			
-			% Find and write down the supposed "best peak" - for this, we'll be
-			% looking at the slice down the middle and seeing where its peak is
-			%mid_spec = spec_img(ceil(end/2), :);
-			peakidxs = zeros([size(fit, 1), 1]);
-			for f = 1:length(peakidxs)
-				[~, peakidxs(f)] = find(abs(params(f,2) - nm_grid) < 0.5, 1);
-			end
-			[~, bestidx] = min(abs(peakidxs - length(nm_grid)/2) .* params(:,1).^(-0.9));
-			best_fit = fit(bestidx, :);
-			best_params = params(bestidx, :);
-			
-			% Copy data into the associated particle in MainWin %
-			parent.UserData.Particles(p).spec = [sel_plot; bg_plot; sig_plot; fit]';
-			parent.UserData.Particles(p).fits = fit';
-			parent.UserData.Particles(p).params = params';
-			parent.UserData.Particles(p).grids = [this_ev_grid; this_nm_grid]';
-			
-			parent.UserData.Particles(p).best_fit = best_fit';
-			parent.UserData.Particles(p).best_params = best_params';
+			% Weed out the useless Lorenztians %
+			this.spec_fits = this.spec_fits([this.spec_fits.isActive]);
+		end
+	end
+	
+	%% VISUALIZATION %%
+	function DispBox(this, ax, sel)
+		%% Arugment Defaults %%
+		if(nargin < 2), ax = UI.axs(1); end		% Default to the Original Img axes %
+		if(nargin < 3), sel = false; end		% Default to not selected %
+		
+		%% Color Selection %%
+		if(sel)
+			color = [0, 0.8, 0];	% Green for the selected particle %
+		else
+			color = [1, 0, 0];		% Red for a non-selected particle %
+		end
+		
+		%% Draw the box %%
+		% Check if it doesn't exist yet, and if so, draw it! %
+		if(isempty(this.peak_lines))
+			% Figure out the dimensions %
+			[filt_sz(2), filt_sz(1)] = size(this.peak_img);
+			spec_edges = this.BND_PX + this.peak_pos(1);
 
-			% Update the found particles string cell for the listbox %
-			parent.UserData.fp_str{p} = join(["Particle", p, "- (", char(10003), ")"]);
-			
-			% Start creating list entries in MainWin %
-			%lbx_fndpart = findobj(parent.Children, 'flat', 'Tag', "lbx: Found Particles");
-			%lbx_fndpart.Enable = 'on';
-			lbx_fndpart.String = parent.UserData.fp_str;
-			drawnow limitrate;
-			%{
-			figure(2);
-			subplot(3,4,1:3);
-			imagesc(spec_img);
-			line([bnds(1), bnds(1)], [0, 22], 'Color', 'r', 'LineWidth', 2);
-			line([bnds(2), bnds(2)], [0, 22], 'Color', 'r', 'LineWidth', 2);
-			
-			subplot(3,4,4);
-			plot([sel_win; bg_win], yy);
-			legend("Selection", "Background");
-			xlabel("Weight");
-			ylabel("Pixel");
-			grid on;
-			
-			subplot(3,4,5:6)
-			sel_img = kron(sel_win', ones([1, size(spec_trun,2)])) .* spec_trun;
-			imagesc(sel_img);
-			title("Selection Image");
-			caxis([0, max(sel_img(:))]);
-			
-			subplot(3,4,7:8)
-			bg_img = kron(bg_win', ones([1, size(spec_trun,2)])) .* spec_trun;
-			imagesc(bg_img);
-			title("Background Image");
-			caxis([0, max(sel_img(:))]);
-			
-			subplot(3,4,9:10)
-			plot(sel_plot);
-			title("Selection Spectrum");
-			axis tight
-			ylim([0, max(sel_plot)]);
-			
-			subplot(3,4,11:12)
-			plot(bg_plot);
-			title("Background Spectrum");
-			axis tight
-			ylim([0, max(sel_plot)]);
-			%}
+			% For brevity: (1,1) = left, (2,1) = right, (1,2) = bottom, (2,2) = top %
+			peak_edges = (this.peak_pos + [-1,1]'/2 * filt_sz);
+
+			%% Peak Box %%
+			% Sides %
+			this.peak_lines{1} = line(ax, peak_edges(1)*[1,1], peak_edges(3:4));
+			this.peak_lines{2} = line(ax, peak_edges(2)*[1,1], peak_edges(3:4));
+
+			% Top/Bottom %
+			this.peak_lines{3} = line(ax, peak_edges(1:2), peak_edges(3)*[1,1]);
+			this.peak_lines{4} = line(ax, peak_edges(1:2), peak_edges(4)*[1,1]);
+
+			%% Spectrum Box %%
+			% Sides %
+			this.spec_lines{1} = line(ax, spec_edges(1)*[1,1], peak_edges(3:4));
+			this.spec_lines{2} = line(ax, spec_edges(2)*[1,1], peak_edges(3:4));
+
+			% Top/Bottom %
+			this.spec_lines{3} = line(ax, spec_edges(1:2), peak_edges(3)*[1,1]);
+			this.spec_lines{4} = line(ax, spec_edges(1:2), peak_edges(4)*[1,1]);
 		end
 		
-		%% MainWin Update %%
-		% Plot the first particle in the spectrum axes %
-		sel_part = lbx_fndpart.Value;
-		Show.SpecPlot(parent.UserData.ax_spec, parent.UserData.Particles(sel_part), ...
-					sel_part, parent.UserData.use_evs);
-		
-		% Change 'Spec Plot' to true %
-		tog_specplt = findobj(parent.Children, 'flat', 'Tag', "Spec Plot");
-		tog_specplt.Value = true;
-		parent.UserData.specplt = true;
+		% Color the boxes %
+		for e = 1:4
+			this.peak_lines{e}.Color = color;
+			this.spec_lines{e}.Color = color;
+		end
 	end
-	function [img_trun, bnds] = TruncateImage(img)
-	% Truncates the image where "the detector is valid".  Essentially, if any pixel
-	% in a column is zero (hence "just noise" becuase there shouldn't be any signal
-	% there) then the following (or leading) columns of the image are no longer
-	% valid, and must be removed.  This leaves just the columns that are completely
-	% nonzero as 'img_trun'.  The bounds are also output so we know the left bound's
-	% offset when making an axis to fit along later.
 	
-		%% Initialize %%
-		% Sizes %
-		[~, X] = size(img);
-		
-		% Bounds %
-		bnds = [1, X];
-		
-		% Minimum of each column %
-		haszero = min(img, [], 1) == 0;
-		
-		% Starting zero flag %
-		flg = haszero(1);
-		
-		%% Iterate through the image's columns %%
-		for col = 1:X
-			% Check if this column has a zero %
-			if(haszero(col))
-				% Check if the flag has been set and we're not in the right 10% %
-				if(flg && col < 0.8*X)
-					% Then we need to move the left bound over to here %
-					bnds(1) = col + 1;
-					
-				% Else check if the flag was lowered and we're not in the left 10% %
-				elseif(~flg && col > 0.2*X)
-					% Then we need to move the right bound here and break %
-					bnds(2) = col - 1;
-					break;
-					
-				else
-					% There was a zero, but we've already passed the left bound, so
-					% start lowering the flag
-					flg = col < 0.2*X;
-				end
-			end
-		end
-		
-		% Return the truncated image %
-		img_trun = img(:, bnds(1):bnds(2));
-	end
-	function [fit, params] = FitLorentzian(data, grid)
-	% The Lorentzian function is given by:
+	function DispPeak(this, ax)
+	% Displays the image of the peak of this particle on the axes specified by 'ax'.
 	%
-	%	L(x) = 2/pi * Gamma/[ 4(x - x_0)^2 + Gamma^2 ]
-	%		 = 2/pi / Gamma [ ( 2(x-x_0)/Gamma )^2 + 1]
+	% To plot in a separate figure, use:
+	% > figure;
+	% > [Particle Instance].DispSpec(gca);
 	%
-	%	It has the special property that the FWHM is Gamma
-	%
-	%	However, for broad and fitting appeal, we need to introduce an amplitude and
-	%	y-intercept term: A, and b respectively.  We can absorb the 2/pi into A:
-	%
-	%	L(x) = A / [ (2(x-x_0)/Gamma )^2 + 1] + b
-	%
-	%	We constrain such that b = 0, as the background should be subtracted
+	% Additional considerations taken:
+	% + Aspect ratio is 1:1
+	% + Grid
+	% + Title is "Peak Image"
+	% + Labeled colorbar with "Intensity (arb.)"
+	% + Axes labels
+	% + Tick marks are shifted to the (x,y) coordinates of the peak
+	%	------------------------------------------------------------------------	
+	%	Argument Definitions:
+	%	> ax:	(axes handle) The axes to display the image on
+	%			(~) The default will reference the 'Peak Image' axes 
 	
-		%% Initialization %%
-		% Fitting parameters %
-		tol = 1E-6;		% Fitting tolerance %
+		%% Argument Defaults %%
+		if(nargin < 2), ax = UI.axs(2); end	% Default to the PeakImg axes %
 		
-		% Sizes %
-		len = length(data);
+		%% Preliminaries %%
+		% Create the tick range %
+		peak_rad = floor( size(this.peak_img, 1)/2 );
+		tick_rng = (0:5:2*peak_rad) + 1;
 		
-		% Initalize the nonlinear least squares optimization options %
-		lsqopt = optimset('lsqnonlin');
-		lsqopt.TolFun = tol;
-		lsqopt.TolX = tol;
-		lsqopt.Display = 'off';
+		%% Refresh %%
+		cla(ax, 'reset');
 		
-		% Establish the bounds of the nonlinear fit (params = [A, x_0, Gamma]) %
-		bnd_lo = [0E4, 0 + grid(1), 0];
-		bnd_hi = [1E4, len + grid(1), len];
+		%% Plotting %%
+		imagesc(ax, this.peak_img);				% Plot the image %
 		
-		% The initial value of the nonlinear fit parameters %
-		p_0 = [1E3, len/2 + grid(1), 20];
+		axis(ax, 'image');						% 1:1 aspect ratio %
+		grid(ax, 'on');							% Show grid %
 		
-		%% Optimization %%
-		% Let MATLAB take care of this fit! %
-		params = lsqnonlin(@(p) LorentzianFxn(p, grid, data), p_0, bnd_lo, bnd_hi, lsqopt);
+		%% Labelling %%
+		title(ax, "Selected Peak Image");		% Title %
 		
-		% Also return the fit itself %
-		fit = LorentzianFxn(params, grid);
+		cb = colorbar(ax);						% Colorbar %
+		cb.Label.String = "Intensity (arb.)";
 		
-		function [res] = LorentzianFxn(p, x, y)
-			% Compute the value of the Lorentzian at each x given parameters p %
-			vals = p(1) ./ ((2*(x-p(2))/p(3)).^2 + 1);
-			
-			% Return the residual with the data given in y %
-			if(nargin < 3)
-				res = vals;
-			else
-				res = vals - y;
-			end
-		end
+		xlabel(ax, "X position (px)");			% Axis labels %
+		ylabel(ax, "Y position (px)");
+		
+		xticks(ax, tick_rng);					% Tick marks %
+		yticks(ax, tick_rng);
+
+		%tick_lbl = zeros([length(tick_rng), 2]);	% Tick labels %
+		tick_lbl = tick_rng' + this.peak_pos - peak_rad - 1;
+% 		for tk = 1:length(tick_rng)
+% 			tick_lbl(tk,:) = tick_rng(tk) + this.peak_pos - peak_rad - 1;
+% 		end
+		xticklabels(ax, {tick_lbl(:,1)});
+		yticklabels(ax, {flip(tick_lbl(:,2))});
 	end
-	function [issue, err] = FitIssue(data, fit, thresh)
-		prob = (data - fit) > thresh * max(data);
-		issue = sum(prob) > 0.10*length(prob);
-		err = (data - fit) .* prob;
+	function DispSpec(this, ax)
+	% Displays the image of the spectrum of this particle on the axes specified by 
+	% 'ax'. 
+	%
+	% To plot in a separate figure (or in your own axes), use:
+	% > figure;
+	% > [Particle Instance].DispSpec([Axes]);
+	%
+	% Additional considerations taken:
+	% + Grid
+	% + Title is "Spectrum Image"
+	% + Labeled colorbar with "Intensity (arb.)"
+	% + Axes labels
+	% + Tick marks are shifted to the (x,y) coordinates of the spectrum
+	%	------------------------------------------------------------------------	
+	%	Argument Definitions:
+	%	> ax:	(axes handle) The axes to display the image on
+	%			(~) The default will reference the 'Spectrum Image' axes 
+	
+		%% Argument Defaults %%
+		if(nargin < 2), ax = UI.axs(3); end	% Default to the SpecImg axes %
+		
+		%% Preliminaries %%
+		% Create the tick range %
+		peak_rad = floor( size(this.peak_img, 1)/2 );
+		ptk_rng = (0:5:2*peak_rad) + 1;
+		
+		%spec_sz = length(this.spec_rng);
+		stk_rng = 1:10:ceil(range(Particle.BND_PX));
+		
+		%% Refresh %%
+		cla(ax, 'reset');
+		
+		%% Plotting %%
+		imagesc(ax, this.spec_img);								% Plot the image %
+		
+																% No aspect ratio! %
+		grid(ax, 'on');											% Show grid %
+		
+		%% Labelling %%
+		title(ax, "Selected Spectrum Image");					% Title %
+		
+		cb = colorbar(ax);										% Colorbar %
+		cb.Label.String = "Intensity (arb.)";
+		
+		xlabel(ax, "X position (px)");							% Axis labels %
+		ylabel(ax, "Y position (px)");
+		
+		xticks(ax, stk_rng);									% Tick marks %
+		yticks(ax, ptk_rng);
+		
+		ptk_lbl = ptk_rng + this.peak_pos(2) - peak_rad - 1;	% Tick labels %
+		stk_lbl = stk_rng + round(Particle.BND_PX(1)) + this.peak_pos(1) - 1;
+
+		xticklabels(ax, {stk_lbl});
+		yticklabels(ax, {flip(ptk_lbl)});
+		
+	end
+	function DispPlot(this, ax)
+	% Displays a plot of the selection, background, signal, and fit of the spectrum
+	% of this particle on axes provided by 'ax'.
+	%
+	% To plot in a separate figure, use:
+	% > figure;
+	% > [Particle Instance].DispSpec(gca);
+	%
+	% Additional considerations taken:
+	% + Title is "Selected Spectrum"
+	% + Axes limits tight to the data
+	% + Grid
+	% + Axes labels
+	% + Wavelength / Energy plotting along the x-axis
+	% + Dynamic legend
+	%	------------------------------------------------------------------------	
+	%	Argument Definitions:
+	%	> ax:	(axes handle) The axes to display the image on
+	%			(~) The default will reference the 'Spectrum Plot' axes 
+	
+		%% Argument Defaults %%
+		if(nargin < 2), ax = UI.axs(4); end		% Default to the Spec Plot axes %
+		
+		%% Refresh %%
+		cla(ax, 'reset');
+		
+		%% Initialization %%		
+		% Check if we should even plot anything %
+		if(isempty(this.spec_plots))
+			text(ax, 0.40, 0.5, "Please fit spectra");
+			return;
+		end
+		
+		% Make the appropriate xgrid %
+		if(Particle.pltopt(1))
+			xgrid = this.RNG_EV;	% Use eV %
+		else
+			xgrid = this.RNG_NM;	% Use nm %
+		end
+		
+		% Initialize the legend %
+		leg = {};
+		
+		%% Plotting %%
+		% Plot the data on the xgrid %
+		hold(ax, 'on');
+		if(Particle.pltopt(2))	% Show Selection & Background %
+			plot(ax, xgrid, this.spec_plots(:,1:2), '--');
+			leg{1} = "Selection";
+			leg{2} = "Background";
+		end
+		if(Particle.pltopt(3))	% Show Signal %
+			plot(ax, xgrid, this.spec_plots(:,3), '--', 'Color', [0.5,0,0.5]);
+			leg{end+1} = "Signal";
+		end
+		
+		plot(ax, xgrid, this.spec_plots(:,3) + sqrt(Particle.fitval(1)*this.pow_noise), ...
+			'Color', [1, 0, 1], 'LineStyle', '--');
+		plot(ax, xgrid, this.spec_plots(:,3) - sqrt(Particle.fitval(1)*this.pow_noise), ...
+			'Color', [1, 0, 1], 'LineStyle', '--');
+		leg{end+1} = "Upper";
+		leg{end+1} = "Lower";
+		
+		plot(ax, xgrid, [this.spec_fits.curve], 'k-', 'LineWidth', 1);
+		leg{end+1} = "Lorenztian Fit";
+		
+		hold(ax, 'off');
+		
+		axis(ax, 'tight');							% Tight axes limits %
+		grid(ax, 'on');								% Grid %
+		
+		% Add in the bells and whistles %
+		title(ax, "Spectrum Plot");					% Title %
+		
+		if(Particle.pltopt(1))	% Use eVs %				% Axis labels %
+			xlabel(ax, "Energy (eV)");
+		else
+			xlabel(ax, "Wavelength (nm)");			
+		end
+		ylabel(ax, "Intensity (arb.)");
+		
+		line(ax, [min(xgrid), max(xgrid)], ...
+			[1,1]*2*sqrt(Particle.fitval(1)*this.pow_noise), ...
+			'Color', [1, 0.5, 0], 'LineStyle', '--');
+		leg{end+1} = "Threshold";
+			
+		legend(ax, leg);							% Legend %
 	end
 end
 
-methods
+%% STATIC METHODS %%
+methods(Static)
+	function [px] = S_NM2PX(nm, px_0, ord)
+	% Converts a given wavelength (in nm) to the corresponding pixel value based on
+	% the calibration.  The pixel offset 'px_0' represents the location of the zeroth
+	% order diffraction, and is optional.  Options to include the nth order
+	% diffraction position are also included in 'ord'
+	%	------------------------------------------------------------------------
+	%	Argument Definitions:
+	%	> nm:	[#] A vector of values to find the pixel location of the nth order
+	%		diffraction of
+	%
+	%	~ px_0:	(#)	A value that determines how far offset the pixels should be from
+	%		the zeroth order diffraction.
+	%			(~) Defaults to 0
+	%
+	%	~ ord:	(#) The order of diffraction to locate
+	%			(~)	Defaults to 1
+	%	
+	%	------------------------------------------------------------------------
+	%	Outputs:
+	%	< px:	[#] A vector of values corresponding to the pixel locations of the
+	%		nth order diffraction
 	
+		%% Arugment Defaults %%
+		if(nargin < 2), px_0 = 0; end	% Default to centered zeroth order %
+		if(nargin < 3), ord = 1; end	% Default to first order diffraction %
+		
+		%% Procedure %%
+		% Calculate the offset for one order %
+		px = (nm - Particle.CAL_INTER) / Particle.CAL_SLOPE;
+		
+		% Determine if we need further than the first order %
+		if(ord ~= 1)
+			% Scale accordingly, it's linear %
+			px = ord * px;
+		end
+		
+		% Determine if we need to apply an offset for the zeroth order %
+		if(px_0 ~= 0)
+			% Offset accordingly %
+			px = px + px_0;
+		end
+	end
+	function [nm] = S_PX2NM(px, px_0, ord)
+	% Converts a given pixel position to the corresponding wavelength (nm) value 
+	% based on the calibration.  The pixel offset 'px_0' represents the location of 
+	% the zeroth order diffraction, and is optional.  Options to include the nth 
+	% order diffraction position are also included in 'ord'
+	%	------------------------------------------------------------------------
+	%	Argument Definitions:
+	%	> px:	[#] A vector of values to find the wavelength value at the nth order
+	%		diffraction
+	%
+	%	~ px_0:	(#)	A value that determines how far offset the pixels should be from
+	%		the zeroth order diffraction.
+	%			(~) Defaults to 0
+	%
+	%	~ ord:	(#) The order of diffraction to locate
+	%			(~)	Defaults to 1
+	%	
+	%	------------------------------------------------------------------------
+	%	Outputs:
+	%	< px:	[#] A vector of values corresponding to the pixel locations of the
+	%		nth order diffraction
+	
+		%% Arugment Defaults %%
+		if(nargin < 2), px_0 = 0; end	% Default to centered zeroth order %
+		if(nargin < 3), ord = 1; end	% Default to first order diffraction %
+		
+		%% Procedure %%
+		% Determine if we need to adjust for the zeroth order offset %
+		if(px_0 ~= 0)
+			% Shift it accordingly %
+			px = px - px_0;
+		end
+		
+		% Determine if we are looking at a higher order diffraction %
+		if(ord ~= 1)
+			% Scale it accordingly %
+			px = px / ord;
+		end
+		
+		% Calculate the wavelength for one order %
+		nm = Particle.CAL_SLOPE * px + Particle.CAL_INTER;
+	end
+	
+	function [issue, err] = FitIssue(data, fit, thr)
+		fit_err = data - fit;
+		fit_issue = abs(fit_err) > thr;
+		
+		issue = sum(fit_issue) > 0.10 * length(data);
+		err = fit_err .* fit_issue;
+	end
 end
+
 
 end
