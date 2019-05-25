@@ -1,8 +1,25 @@
 # Sidescope_Spectral_Fitting
 MATLAB code allowing for spectral analysis using the Landes Lab's Sidescope - Based on existing code written for the group.
 
-
 CHANGELOG:
+-- v0.5.5:
+
+Refactored the code (again) and allowed for Frames to host their Particles independent of each other.  Full functionality is on the way.  That said, some notable additions:
+
+- Background correction is now handled properly, running over the entire image and obtaining the intensity values of the spectrum where there isn't any, so we have the background illumination.  We then subtract this from the selection and outlier images and get a much flatter signal.
+
+- The spectrum plot looks *gorgeous* now.  The signal has an "error region" according to the SNR provided, as well as the ability to show the Amplitude Thresholds (the point where a fit's amplitude must exceed in order to be considered a fit) and a decomposition of the Lorentzian fits along with the total.
+
+- Everything is a part of objects now.  Life is organized, if a little slower.
+
+- DOCUMENTATION!  The files are now more green than not green.  It's a work in progress, but hopefully it's understandable what each function does.
+
+- Introduced the Fit class, which can also be a general repository for fitting things other than Lorentzians.  The class is written rather generally in order to encapsulate the future uses of it.  For example, you could additionally fit a Gaussian could be done using another instance of the same class.
+
+- Read Conventions.md for a list of rules I try to follow.  I need to update a few things in the code before it's actually correct.
+
+That said, look forward to proper multi-Frame handling in the next update!  This includes multi-Frame selection and fitting, as well as exporting, and coming up with a clearer way to handle multiple selections.  The functionality is *mostly* built in, but it will definitely need some tweaking.
+
 -- v0.3:
 
 Refactored the code (phew) and added a whole bunch of functionality.  Notably:
