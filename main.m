@@ -21,9 +21,12 @@ menu_file = uimenu(MainWin, 'Text', 'File');
 	
 menu_plt = uimenu(MainWin, 'Text', 'Plotting');
 	UI.MakeMenu(MainWin, menu_plt, "Use eVs", @menu_plot_OnClick, 1);
-	UI.MakeMenu(MainWin, menu_plt, "Show Filter Spectra", @menu_plot_OnClick, 2, true, true);
-	UI.MakeMenu(MainWin, menu_plt, "Show Signal Spectrum", @menu_plot_OnClick, 3, true);
-			 
+	UI.MakeMenu(MainWin, menu_plt, "Show Selection Spectra", @menu_plot_OnClick, 2, true, true);
+	UI.MakeMenu(MainWin, menu_plt, "Show Outlier Spectra", @menu_plot_OnClick, 3, true);
+	UI.MakeMenu(MainWin, menu_plt, "Show Signal Spectrum", @menu_plot_OnClick, 4, true);
+	UI.MakeMenu(MainWin, menu_plt, "Show Fit Decomposition", @menu_plot_OnClick, 5, true);
+	UI.MakeMenu(MainWin, menu_plt, "Show Ampltude Threshold", @menu_plot_OnClick, 6, false, true);
+	
 % Make the axes we will be using %
 UI.MakeAxes(MainWin, [0.00, 0.20, 0.40, 0.80], "Original Image", ...
 	"X (px)", "Y (px)");
@@ -61,7 +64,7 @@ UI.MakeParamSlider(MainWin, [0.40, 0.05, 0.15, 0.05], ['Filter ', char(963)], ..
 
 % Sliders - Fit Parameters (Particle.fitval) %
 UI.MakeParamSlider(MainWin, [0.60, 0.15, 0.15, 0.05], "SNR Threshold", ...
-	[1, 3, 10, 1/90, 1/9], @sld_fitpara_OnValueChanged, 1, false, '%5.1f', @(val) val^2);
+	[1, 3, 5, 1/40, 1/4], @sld_fitpara_OnValueChanged, 1, false, '%5.1f');
 UI.MakeParamSlider(MainWin, [0.60, 0.10, 0.15, 0.05], "Max Lorentzians", ...
 	[1, 2, 5, 0.25, 0.5], @sld_fitpara_OnValueChanged, 2, true, '%1.0f');
 UI.MakeParamSlider(MainWin, [0.60, 0.05, 0.15, 0.05], "Fit Iterations", ...
@@ -136,7 +139,6 @@ function menu_load_OnClick(parent, ~, ~)
 	
 	%% MainWin Update %%
 	% Activate the first Frame %
-	parent.UserData.Frames(1).isActive = true;
 	Frame.actidx(1, true);
 	
 	% Draw the active frame into the 'Original Image' axes %
@@ -149,6 +151,7 @@ function menu_load_OnClick(parent, ~, ~)
 	
 	% Show the Frame Slider if applicable %
 % 	if(framenum > 1)
+% 		UI.Ctrl_Set("sld: Frame Control", UI.ctrls, 'Max', framenum);
 % 		UI.Ctrl_Show("sld: Frame Control");
 % 		UI.Ctrl_Show("numlbl: Frame Control");
 % 	end
@@ -320,7 +323,7 @@ function sld_winpara_OnValueChanged(parent, obj, numlbl)
 	if(isempty(activeFrame.Particles)), return; end
 	
 	% Else, Re-plot the boxes around the particles %
-	activeFrame.DispBox();
+	%activeFrame.DispBox();
 	
 	% Re-plot the peak and spectrum images %
 	
@@ -491,6 +494,10 @@ function lbx_found_OnValueChanged(parent, obj)
 end
 
 function btn_exp_OnClick(parent, ~, ~)
+%
+%	----------------------------------------------------------------------------
+%	Argument Definitions
+%	> parent:	(MainWin)
 
 	%% Initialization %%
 	% Write a header for each particle present in this frame %
@@ -501,11 +508,14 @@ function btn_exp_OnClick(parent, ~, ~)
 	% For each particle, export out... %
 	for p = 1:num_parts
 		% Position %
-		data(p).pos_peak = particles(p).peak_pos;
+		data(p).pos_peak = particles(p).peak_pos';
 		
 		% Images %
 		data(p).img_peak = particles(p).peak_img;
 		data(p).img_spec = particles(p).spec_img;
+		
+		% Find out where the peak is, pixel wise %
+		[~, data(p).idx_spec] = max(sum(particles(p).spec_img(7:13,:), 2));
 		
 		% Plots %
 		data(p).plt_sel = particles(p).spec_plots(:,1);

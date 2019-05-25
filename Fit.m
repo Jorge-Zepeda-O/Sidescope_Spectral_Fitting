@@ -18,8 +18,10 @@ methods
 		
 		obj.param = zeros([params, 1]);
 		
-		obj.domain = domain;
-		obj.curve = zeros(size(domain));
+		obj.domain = zeros([length(domain), 1]);
+		obj.domain(:) = domain;
+		
+		obj.curve = zeros(size(obj.domain));
 		
 		obj.isActive = isActive;
 		
@@ -86,11 +88,11 @@ methods(Static)
 		end
 		
 		% Establish the bounds of the nonlinear fit [x_0, Gamma, (A), (b)] %
-		bnd_min = [x(1),				0,		-max(y),-max(y)	];
-		bnd_max = [x(end),			length(x),	max(y),	 max(y)	];
+		bnd_min = [x(1),				0,			 min(y),	min(y)	];
+		bnd_max = [x(end),			length(x),		 max(y),	max(y)	];
 		
 		% The initial value of the nonlinear fit parameters %
-		p_0 =	  [x(round(end/2)),		20,		mean(y),	0	];
+		p_0 =	  [x(round(end/2)),	length(x)/4,	mean(y),		0	];
 		
 		%% Nonlinear Least Squares Fitting %%
 		% Perform a nonlinear least-squares fit on the Lorentzian Function to find

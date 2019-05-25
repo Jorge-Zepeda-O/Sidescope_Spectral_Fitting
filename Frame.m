@@ -53,8 +53,6 @@ methods(Static)
 end
 
 properties
-	isActive	% (bool)	Determines if this Frame is currently selected or not %
-	
 	%% File Handling %%
 	file_folder	% ("str")	The location of the file %
 	file_name	% ("str")	The name of the file (including extension) %
@@ -68,8 +66,11 @@ properties
 	img_det		% [[x,y]] The image to analyze, but everything below 'thr_det' = 0 %
 	img_sig		% [[x,y]] The image to analyze, but everything below 'thr_sig' = 0 %
 	
+	%% Spectrum %%
+	spec_bg		% [#]	An array of values corresponding to the background spectrum %
+	
 	%% Children %%
-	Particles	% [Particle]	An array of Particles identified in 'img' %
+	Particles	% [Particle]	An array of Particles identified in the ROI %
 	actPar		% [#]	An array of indicides corresponding to the active Particles
 end
 
@@ -98,9 +99,6 @@ methods
 		%% Argument Pass-ins %%
 		obj.file_folder = file_folder;
 		obj.file_name	= file_name;
-		
-		%% Initialization %%
-		obj.isActive = false;	% Start every Frame as inactive %
 		
 		%% Loading %%
 		% Load the frame given by 'frame_num' into memory %
@@ -212,6 +210,9 @@ methods
 		% This can be a time-intensive process; create a waitbar %
 		wb = waitbar(0, "Finding Particles...");
 		
+		lbx_str = {};
+		pnum = 0;
+		
 		% For each found peak, create a child Particle %
 		for p = 1:size(peak_pos, 1)
 			% Update the waitbar %
@@ -224,10 +225,19 @@ methods
 			
 			% Pass in the particle's peak position and the image slice %
 			part = Particle(peak_pos(p,:), this.img(peak_yrng, :));
-			lbx_str{p} = part.str;	% For the Listbox %
+			
+			% Drop the particle if it's not the maximum in its own box %
+			if(max(part.peak_img(:)) ~= max(max(part.peak_img( ...
+					Frame.winval(1) + 1 + (-2:2), Frame.winval(1) + 1 + (-2:2)))))
+				continue; 
+			end
+			
+			pnum = pnum + 1;
+			lbx_str{pnum} = join(["Particle #", pnum, "@ (", ...
+				part.peak_pos(1), ",", part.peak_pos(2), ")"]);
 			
 			% Append this particle to the Frame's particle list %
-			this.Particles(p) = part;
+			this.Particles(pnum) = part;
 		end
 		% Close the waitbar %
 		close(wb);
@@ -236,29 +246,37 @@ methods
 		% Activate the first particle found %
 		this.actPar = 1;
 		
-		% Listbox updates %
+		% Listbox updates %		
 		lbx = UI.FindObject("lbx: Found Particles");	% Get the Listbox %
 		lbx.String = lbx_str;		% Makes the Listbox have an item per Particle %
 		lbx.Value = 1;				% Sets the current item to the first one %
 	end
 	function FitROI(this, wb)
-		
-		%% Initialization %%
-		win_rad = Frame.winval(1);
-		win_sig = Frame.winval(2);
-		
+	% Function that fits all particles in the ROI with multiple Lorentzians.  In the
+	% process
+		%% Image Analysis %%		
 		% Get the noise power, which is just its variance in what we didn't detect %
 		pow_noise = var(this.img(this.img < this.thr_det));
 		
+		% Get the range over which we can calculate the spectrum background.  This
+		% begins failing if the slit is too wide, however, so be careful!
+		part_pos = [this.Particles.peak_pos];
+		xrng = round(Particle.BND_PX(1) + min(part_pos(1,:))) : ...
+			round(Particle.BND_PX(2) + max(part_pos(1,:)));
+		
+		% Calculate the spectrum background.  This is complicated, so look at the
+		% relevant function.
+		this.GetSpectrumBG(xrng, pow_noise);
+		
 		%% Create Filters %%
 		% Make the selection, background, and total filters %
-		ygrid = (-win_rad:win_rad)';		% Grid along the y-dimension %
+		ygrid = (-Frame.winval(1):Frame.winval(1))';	% Grid along the y-axis %
 		yoff = 0;
 
-		filt_sel = exp(- (ygrid-yoff).^2 / (2*win_sig^2));	% Gaussian Filter %
-		filt_bg = 1 - filt_sel;							% Inverse-Gaussian Filter %
+		filt_sel = exp(- (ygrid-yoff).^2 / (2*Frame.winval(2)^2)); % Gaussian Filter %
+		filt_oth = 1 - filt_sel;							% Inverse-Gaussian Filter %
 		
-		filt_wgt = [filt_sel, filt_bg];		% Combine together for simplicity %
+		filt_wgt = [filt_sel, filt_oth];	% Combine together for simplicity %
 
 		% Normalize the Filters %
 		filt_wgt = filt_wgt ./ sum(filt_wgt, 1);
@@ -266,12 +284,59 @@ methods
 		%% Fit each Spectrum %%
 		for p = 1:length(this.Particles)	
 			% Call the spectrum fitting function for this particle %
-			this.Particles(p).Fit_Spectrum(filt_wgt, pow_noise);
+			this.Particles(p).Fit_Spectrum(filt_wgt, xrng, this.spec_bg, pow_noise);
 			
 			% Update the waitbar %
 			waitbar(p / length(this.Particles), wb, ...
 				join(["Fitting Spectra (", p, "/", length(this.Particles), ")"]));
 		end
+	end
+	
+	function GetSpectrumBG(this, xrng, pow_noise)
+	% Calculate the Background in the spectrum as a function of pixel.  We do
+	% this by selecting several small chunks throughout the image and looking at
+	% their standard deviation.  If it's too high, then it likely contains a
+	% peak, and we need to ignore it.  Once we have determined which chunks are
+	% viable, we then take the mean of those over the x-position to get our
+	% background signal.
+		
+		%% Slice up the Spectrum Images %%
+		% For the slice width, just use the window size.  That's what we're
+		% integrating over anyways, and it saves using another parameter / slider
+		slice_rad = floor(Frame.winval(1) / 2);
+		
+		% Compute the number of slices we need to take.  They will overlap with each
+		% other by half, and this is intentional
+		slices = size(this.img, 2) / slice_rad - 1;
+		
+		% Get the middle slice positions to sprawl out from (forget the top and
+		% bottom slices, they're usually just blank anyways)
+		slice_pos = (2:slices-1)*slice_rad;
+	
+		% Get the slices ranges %
+		slice_rng = (-slice_rad:slice_rad)' + slice_pos;
+		
+		% Set up the valid slices %
+		slice_valid = [];
+		
+		for s = 1:slices - 2
+			% Get the slice specified %
+			slice = this.img(slice_rng(:,s), xrng);
+			
+			% Compute the variance along y %
+			slice_var = mean(var(slice, 0, 2));
+			
+			% Check if it's small enough to not be a peak, but large enough to be
+			% something
+			if(slice_var < 50*pow_noise && slice_var > 10*pow_noise)
+				% Append the mean to the valid slices - the mean of means is the mean
+				% of the whole, so don't worry.
+				slice_valid(:,end+1) = mean(slice, 1);
+			end
+		end
+		
+		% Compute the mean of means %
+		this.spec_bg = mean(slice_valid, 2);
 	end
 	
 	%% VISUALIZATION %%

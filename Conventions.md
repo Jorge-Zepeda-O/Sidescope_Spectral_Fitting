@@ -91,6 +91,9 @@ Indicates an output argument
 - **`Argument Defaults`**  
 The section that handles optional arguments
 
+- **`Argument Passing`**  
+The section that holds logic for passing parameters into a class
+
 - **`Initialize`**  
 The section that allocates memory to various variables
 
