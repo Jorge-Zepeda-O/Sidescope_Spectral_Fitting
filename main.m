@@ -5,10 +5,14 @@ Frame.REFRESH;
 Particle.REFRESH;
 
 %% MAINWIN %%
+% Get the dimensions of the screen itself and the desired dimensions of MainWin %
+screen = get(0, 'screensize');
+mw_dim = [1600, 800];			% 2:1 aspect ratio %
+
 % Here we will set up the main window that we'll be using everything for %
 MainWin = figure('Name', 'Sidescope Pro', 'Menubar', 'none', ...
 				 'NumberTitle', 'off', 'DoubleBuffer', 'on', ...
-				 'Position', [100, 100, 1800, 900]);
+				 'Position', [screen(3:4) - mw_dim, 2*mw_dim]/2);
 			 
 % Set up the various parameters we'll need %
 MainWin.UserData.DEBUG = false;
@@ -28,15 +32,15 @@ menu_plt = uimenu(MainWin, 'Text', 'Plotting');
 	UI.MakeMenu(MainWin, menu_plt, "Show Ampltude Threshold", @menu_plot_OnClick, 6, false, true);
 	
 % Make the axes we will be using %
-UI.MakeAxes(MainWin, [0.00, 0.20, 0.40, 0.80], "Original Image", ...
+UI.MakeAxes(MainWin, [0.000, 0.225, 0.350, 0.800], "Original Image", ...
 	"X (px)", "Y (px)");
 
-UI.MakeAxes(MainWin, [0.375, 0.75, 0.20, 0.25], "Selected Peak Image", ...
+UI.MakeAxes(MainWin, [0.350, 0.725, 0.175, 0.275], "Selected Peak Image", ...
 	"X (px)", "Y (px)");
-UI.MakeAxes(MainWin, [0.55, 0.75, 0.475, 0.25], "Selected Spectrum Image", ...
+UI.MakeAxes(MainWin, [0.500, 0.725, 0.475, 0.275], "Selected Spectrum Image", ...
 	"X Position (px)", "Y (px)");
 
-UI.MakeAxes(MainWin, [0.55, 0.25, 0.45, 0.50], "Selected Spectrum", ...
+UI.MakeAxes(MainWin, [0.550, 0.250, 0.450, 0.500], "Selected Spectrum", ...
 	"Wavelength (nm)", "Intensity (arb.)");
 
 %% UI CONTROLS %%
@@ -53,7 +57,7 @@ UI.MakeButton(MainWin, [0.80, 0.10, 0.10, 0.05], "Export Data", ...
 	@btn_exp_OnClick, false);
 
 % Sliders - Frame Control %
-UI.MakeFrameSlider(MainWin, [0.05, 0.15, 0.30, 0.05], "Frame Control", ...
+UI.MakeFrameSlider(MainWin, [0.05, 0.20, 0.30, 0.05], "Frame Control", ...
 	[1, 1, 1], @sld_frame_OnValueChanged, false);
 
 % Sliders - Window Parameters (Frame.winval) %

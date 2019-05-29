@@ -1,6 +1,8 @@
 classdef Fit < handle
 % A semi-static class for generating and fitting functions.  Contains some
 % functionality for organizing fit information
+
+%% DYNAMIC VARIABLES %%
 properties
 	param	% The fit parameters %
 	
@@ -10,6 +12,7 @@ properties
 	isActive	% Is this fit useful? %
 end
 
+%% DYNAMIC METHODS %%
 methods
 	function [obj] = Fit(domain, params, isActive)
 		

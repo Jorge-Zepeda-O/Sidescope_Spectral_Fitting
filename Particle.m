@@ -97,7 +97,7 @@ properties
 	filt_lines	% [line] Array of lines that show where the selection box is %
 end
 
-%% DEPENDENT PROPERTIES %%
+%% DEPENDENT VARIABLES %%
 properties(Dependent)
 	%% Strings %%
 	str_loc	% "(x, y)"
@@ -497,6 +497,7 @@ methods(Static)
 		%% Plotting %%
 		imagesc(ax, part.spec_img);								% Plot the image %
 		
+		axis(ax, 'image');						% 1:1 aspect ratio %
 																% No aspect ratio! %
 		grid(ax, 'on');											% Show grid %
 		

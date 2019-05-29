@@ -2,12 +2,17 @@ classdef UI
 % A static class for creating and mutating UI controls
 
 %% STATIC VARIABLES %%
-%	> axs:		[Axes]
-%	> menus:	[Menu]
-%	> ctrls:	[UIControl]
+%	> axs:		[Axes]	A vector of Axes handles to the four axes provided in
+%		MainWin: The original image (1), the selected peak image (2), the selected
+%		spectrum image (3), and the spectrum plot (4).
+%
+%	> menus:	[Menu]	A vector of Menu handles to the various menu options
+%		available in MainWin.  Doesn't get called much.
+%
+%	> ctrls:	[UIControl]		A vector of UIControl handles to all the different
+%		controls available in MainWin.  Serves more as a 
 methods(Static)	
-	% Axes %
-	function [value] = axs(val, write)
+	function [value] = axs(val, write)		% Axes %
 		persistent axs;
 		
 		% Change behavior based on the number of input arguments - 1D arrays only %
@@ -33,8 +38,7 @@ methods(Static)
 		end
 	end
 	
-	% Menus %
-	function [value] = menus(val, write)
+	function [value] = menus(val, write)	% Menus %
 		persistent menus;
 		
 		% Change behavior based on the number of input arguments - 1D arrays only %
@@ -60,8 +64,7 @@ methods(Static)
 		end
 	end
 	
-	% Controls %
-	function [value] = ctrls(val, write)
+	function [value] = ctrls(val, write)	% Controls %
 		% Establish the persistent variable %
 		persistent ctrls;
 		

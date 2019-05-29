@@ -1,6 +1,11 @@
 classdef Frame < handle
 % A class for things dealing with frames in a .tiff image 
 
+%% CONSTANT VARIABLES %%
+properties(Constant)
+	MAGNIFICATION = 40
+end
+
 %% STATIC VARIABLES %%
 %	> actidx:	[#] Array of indicies of the currently active/selected frames.  This 
 %		formalism allows for multiple frames to be selected at once.
@@ -52,6 +57,7 @@ methods(Static)
 	end
 end
 
+%% DYNAMIC VARIABLES %%
 properties
 	%% File Handling %%
 	file_folder	% ("str")	The location of the file %
@@ -302,7 +308,6 @@ methods
 
 			% Append this particle to the Frame's particle list %
 			this.Particles(pnum) = part;
-			
 		end
 		% Close the waitbar %
 		close(wb);
@@ -366,6 +371,7 @@ methods
 	% + Title is ["Original Image (", this.file_name, ")"]
 	% + Labeled colorbar with "Intensity (arb.)"
 	% + Axes labels
+	% + Scale Bar
 	%	------------------------------------------------------------------------	
 	%	Argument Definitions:
 	%	> ax:	(axes handle) The axes to display the image on
