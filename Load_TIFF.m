@@ -4,11 +4,11 @@ function [data] = Load_TIFF(filepath, framerange, beginend)
 % 	Arugment Definitions:
 % 	> filepath:		"x" The path of the file to be read
 % 
-% 	> framerange:	[#] The frames (in order) to look at
+% 	~ framerange:	[#] The frames (in order) to look at
 % 					(i,j) The beginning and end frames (requires beginend = true)
 %					(~) The default will take all available frames, ascending
 % 
-% 	> beginend:		(T/F) if framerange has only two elements, interprets those two 
+% 	~ beginend:		(T/F) if framerange has only two elements, interprets those two 
 %		elements as the beginning and end of the framerange (or if improperly 
 %		ordered, as the end and beginning, respectively.)
 %					(~) The default will only select the frames given

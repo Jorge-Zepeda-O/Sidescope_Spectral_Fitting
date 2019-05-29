@@ -132,7 +132,54 @@ methods
 	end
 	
 	%% METHODS %%
-	function SelectROI(this)
+	function GetSpectrumBG(this, xrng, pow_noise)
+	% Calculate the Background in the spectrum as a function of pixel.  We do
+	% this by selecting several small chunks throughout the image and looking at
+	% their standard deviation.  If it's too high, then it likely contains a
+	% peak, and we need to ignore it.  Once we have determined which chunks are
+	% viable, we then take the mean of those over the x-position to get our
+	% background signal.
+		
+		%% Slice up the Spectrum Images %%
+		% For the slice width, just use the window size.  That's what we're
+		% integrating over anyways, and it saves using another parameter / slider
+		slice_rad = floor(Frame.winval(1) / 2);
+		
+		% Compute the number of slices we need to take.  They will overlap with each
+		% other by half, and this is intentional
+		slices = size(this.img, 2) / slice_rad - 1;
+		
+		% Get the middle slice positions to sprawl out from (forget the top and
+		% bottom slices, they're usually just blank anyways)
+		slice_pos = (2:slices-1)*slice_rad;
+	
+		% Get the slices ranges %
+		slice_rng = (-slice_rad:slice_rad)' + slice_pos;
+		
+		% Set up the valid slices %
+		slice_valid = [];
+		
+		for s = 1:slices - 2
+			% Get the slice specified %
+			slice = this.img(slice_rng(:,s), xrng);
+			
+			% Compute the variance along y %
+			slice_var = mean(var(slice, 0, 2));
+			
+			% Check if it's small enough to not be a peak, but large enough to be
+			% something
+			if(slice_var < 50*pow_noise && slice_var > 10*pow_noise)
+				% Append the mean to the valid slices - the mean of means is the mean
+				% of the whole, so don't worry. << CHECK THIS 
+				slice_valid(:,end+1) = mean(slice, 1);
+			end
+		end
+		
+		% Compute the mean of means %
+		this.spec_bg = mean(slice_valid, 2);
+	end
+	
+	function SelectROI(this, append)
 	% This function prompts the user to select a Region of Interest (ROI) of the
 	% Frame.  This ROI is then analyzed for particles, and a series of Particle
 	% objects are created and attributed to this Frame.
@@ -142,8 +189,11 @@ methods
 	%		storing and keeping track of many different instance variables.
 	
 		%% Refresh %%
-		% Refresh the Particles field with an empty Particle array %
-		this.Particles = Particle.empty;
+		% If we're not appending to the current particle array, or its empty
+		if(~append || isempty(this.Particles))
+			% Refresh the Particles field with an empty Particle array %
+			this.Particles = Particle.empty;
+		end
 	
 		%% User-Input %%
 		% Prompt the user to select a rectangular Region of Interest (ROI) %
@@ -211,7 +261,14 @@ methods
 		wb = waitbar(0, "Finding Particles...");
 		
 		lbx_str = {};
-		pnum = 0;
+		if(append)
+			pnum = length(this.Particles);
+			for p = 1:pnum
+				lbx_str{p} = join(["Particle #", p, "@", this.Particles(p).str_loc]);
+			end
+		else
+			pnum = 0;
+		end
 		
 		% For each found peak, create a child Particle %
 		for p = 1:size(peak_pos, 1)
@@ -231,13 +288,21 @@ methods
 					Frame.winval(1) + 1 + (-2:2), Frame.winval(1) + 1 + (-2:2)))))
 				continue; 
 			end
-			
+
+			if(append)
+				% Check to see if this particle already exists %
+				if(any(any(part.peak_pos(1) == [this.Particles(:).peak_pos])) && ...
+					any(any(part.peak_pos(2) == [this.Particles(:).peak_pos])))
+					% Don't add it in, it's already here %
+					continue;
+				end
+			end
 			pnum = pnum + 1;
-			lbx_str{pnum} = join(["Particle #", pnum, "@ (", ...
-				part.peak_pos(1), ",", part.peak_pos(2), ")"]);
-			
+			lbx_str{pnum} = join(["Particle #", pnum, "@", part.str_loc]);
+
 			% Append this particle to the Frame's particle list %
 			this.Particles(pnum) = part;
+			
 		end
 		% Close the waitbar %
 		close(wb);
@@ -292,53 +357,6 @@ methods
 		end
 	end
 	
-	function GetSpectrumBG(this, xrng, pow_noise)
-	% Calculate the Background in the spectrum as a function of pixel.  We do
-	% this by selecting several small chunks throughout the image and looking at
-	% their standard deviation.  If it's too high, then it likely contains a
-	% peak, and we need to ignore it.  Once we have determined which chunks are
-	% viable, we then take the mean of those over the x-position to get our
-	% background signal.
-		
-		%% Slice up the Spectrum Images %%
-		% For the slice width, just use the window size.  That's what we're
-		% integrating over anyways, and it saves using another parameter / slider
-		slice_rad = floor(Frame.winval(1) / 2);
-		
-		% Compute the number of slices we need to take.  They will overlap with each
-		% other by half, and this is intentional
-		slices = size(this.img, 2) / slice_rad - 1;
-		
-		% Get the middle slice positions to sprawl out from (forget the top and
-		% bottom slices, they're usually just blank anyways)
-		slice_pos = (2:slices-1)*slice_rad;
-	
-		% Get the slices ranges %
-		slice_rng = (-slice_rad:slice_rad)' + slice_pos;
-		
-		% Set up the valid slices %
-		slice_valid = [];
-		
-		for s = 1:slices - 2
-			% Get the slice specified %
-			slice = this.img(slice_rng(:,s), xrng);
-			
-			% Compute the variance along y %
-			slice_var = mean(var(slice, 0, 2));
-			
-			% Check if it's small enough to not be a peak, but large enough to be
-			% something
-			if(slice_var < 50*pow_noise && slice_var > 10*pow_noise)
-				% Append the mean to the valid slices - the mean of means is the mean
-				% of the whole, so don't worry.
-				slice_valid(:,end+1) = mean(slice, 1);
-			end
-		end
-		
-		% Compute the mean of means %
-		this.spec_bg = mean(slice_valid, 2);
-	end
-	
 	%% VISUALIZATION %%
 	function DispImg(this, ax)
 	% Displays the image contained in this Frame on the axes specified by 'ax'.
@@ -357,16 +375,26 @@ methods
 		if(nargin < 2), ax = UI.axs(1); end	% Default to the OriginalImage axes %
 		
 		%% Refresh %%
-		cla(ax, 'reset');
+		% Wipe off all the boxes previously there %
+		children = ax.Children;
+		for c = 1:length(children)-1
+			children(c).Visible = 'off';
+		end
+		%cla(ax, 'reset');
 		
 		%% Plotting %%
-		imagesc(ax, this.img);						% Plot the image %
+		if(isempty(children))						
+			imagesc(ax, this.img);					% Plot the image the first time %
+		else
+			children(end).CData = this.img;			% Swap out the previous image %
+		end
 		
-		xlim(ax, [1/4, 3/4]*size(this.img, 1));		% Constrain the viewing region %
 		axis(ax, 'image')							% 1:1 Aspect Ratio
+		xlim(ax, [1/6, 5/6]*size(this.img, 1));		% Constrain the viewing region %
 		
 		%% Labeling %%
-		title(ax, join(["Original Image (", this.file_name, ")"]));	% Title %
+		t = title(ax, join(["Original Image (", this.file_name, ")"]));	% Title %
+		t.Interpreter = 'none';	% Remove the TeX interpreter %
 		
 		c = colorbar(ax);							% Colorbar %
 		c.Label.String = "Intensity (arb.)";
@@ -385,12 +413,18 @@ methods
 		if(nargin < 2), ax = UI.axs(1); end	% Default to the OriginalImage axes %
 		
 		%% Refresh %%
-		% Wipe clean any previous boxes %
-		delete(ax.Children(1:end-1));
+		% Gather all the children %
+		children = ax.Children;
+		
+		% Make invisible any previous boxes %
+		for c = 1:length(children)-1
+			children(c).Visible = 'off';
+		end
 		
 		%% Draw Boxes %%
 		% Run through all particles in this frame and draw the appropriately colored
-		% box around each one
+		% box around each one.  If a particle that previously had a box is selected
+		% again, the box will become visible once more.
 		for p = 1:length(this.Particles)
 			% If p is an active particle, then it will draw a green box %
 			this.Particles(p).DispBox(ax, any(p == this.actPar));

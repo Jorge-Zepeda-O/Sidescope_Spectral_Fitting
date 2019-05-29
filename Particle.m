@@ -26,7 +26,7 @@ end
 %		(show_ev, show_bg, show_sig)
 %
 %	> fitval:	[#]		Array of numbers corresponding to the values of the fitting
-%		parameter sliders in MainWin (fit_snr, fit_lor, fit_itr)
+%		parameter sliders in MainWin (fit_snr, fit_tol, fit_lor, fit_itr)
 methods(Static)
 	function [value] = pltopt(val, write)	% Plotting Options %
 		persistent pltopt;
@@ -95,6 +95,17 @@ properties
 	peak_lines	% [line] Array of lines that define the box around the peak image %
 	spec_lines	% [line] Array of lines that define the box around the spectrum img %
 	filt_lines	% [line] Array of lines that show where the selection box is %
+end
+
+%% DEPENDENT PROPERTIES %%
+properties(Dependent)
+	%% Strings %%
+	str_loc	% "(x, y)"
+end
+methods
+	function [value] = get.str_loc(this)
+		value = join(["(", this.peak_pos(1), ",", this.peak_pos(2), ")"]);
+	end
 end
 
 %% DYNAMIC METHODS %%
@@ -179,7 +190,7 @@ methods
 		%% Multiple Lorentzian Fitting %%		
 		% Initialize the vector arrays for the fits and the parameters.  Note that
 		% the domain is over the nm range.
-		numfits = Particle.fitval(2);
+		numfits = Particle.fitval(3);
 		this.spec_fits = Fit.empty;
 		for f = 1:numfits
 			this.spec_fits(f) = Fit(Particle.RNG_NM, 3, f == 1);
@@ -191,7 +202,7 @@ methods
 			this.spec_fits.Fit_Lorentzian(spec_sig);
 		else
 			% Repeat for the specified number of iterations... %
-			for i = 1:Particle.fitval(3)
+			for i = 1:Particle.fitval(4)
 				% Repeat for each Lorentzian involved... %
 				for l = 1:numfits
 					% Get the sum-fit for all *other* Lorentizans %
@@ -199,7 +210,7 @@ methods
 
 					% Get the error of fit_other with the raw data %				
 					[issue, fit_err] = Particle.FitIssue(spec_sig, fit_other, ...
-						sqrt(pow_noise / Particle.fitval(1)));
+						sqrt(pow_noise) / Particle.fitval(2));
 					if(~issue)
 						if(~this.spec_fits(l).isActive)
 							continue;
@@ -212,7 +223,7 @@ methods
 					this.spec_fits(l).Fit_Lorentzian(fit_err);
 
 					% If this fit doesn't really matter too much, nuke it %
-					if(this.spec_fits(l).param(1)^2 < Particle.fitval(1)*pow_noise)
+					if(this.spec_fits(l).param(3)^2 < Particle.fitval(1)*pow_noise)
 						this.spec_fits(l).isActive = false;
 						this.spec_fits(l).Refresh();
 					else
@@ -272,228 +283,22 @@ methods
 			this.spec_lines{4} = line(ax, spec_edges(1:2), peak_edges(4)*[1,1]);
 		end
 		
-		% Color the boxes %
+		% Color the boxes and make them visible %
 		for e = 1:4
+			% Peak box %
 			this.peak_lines{e}.Color = color;
+			this.peak_lines{e}.Visible = 'on';
+			
+			% Spectrum box %
 			this.spec_lines{e}.Color = color;
+			this.spec_lines{e}.Visible = 'on';
 		end
-	end
-	
-	function DispPeak(this, ax)
-	% Displays the image of the peak of this particle on the axes specified by 'ax'.
-	%
-	% To plot in a separate figure, use:
-	% > figure;
-	% > [Particle Instance].DispSpec(gca);
-	%
-	% Additional considerations taken:
-	% + Aspect ratio is 1:1
-	% + Grid
-	% + Title is "Peak Image"
-	% + Labeled colorbar with "Intensity (arb.)"
-	% + Axes labels
-	% + Tick marks are shifted to the (x,y) coordinates of the peak
-	%	------------------------------------------------------------------------	
-	%	Argument Definitions:
-	%	> ax:	(axes handle) The axes to display the image on
-	%			(~) The default will reference the 'Peak Image' axes 
-	
-		%% Argument Defaults %%
-		if(nargin < 2), ax = UI.axs(2); end	% Default to the PeakImg axes %
-		
-		%% Preliminaries %%
-		% Create the tick range %
-		peak_rad = floor( size(this.peak_img, 1)/2 );
-		tick_rng = (0:5:2*peak_rad) + 1;
-		
-		%% Refresh %%
-		cla(ax, 'reset');
-		
-		%% Plotting %%
-		imagesc(ax, this.peak_img);				% Plot the image %
-		
-		axis(ax, 'image');						% 1:1 aspect ratio %
-		grid(ax, 'on');							% Show grid %
-		
-		%% Labelling %%
-		title(ax, "Selected Peak Image");		% Title %
-		
-		cb = colorbar(ax);						% Colorbar %
-		cb.Label.String = "Intensity (arb.)";
-		
-		xlabel(ax, "X position (px)");			% Axis labels %
-		ylabel(ax, "Y position (px)");
-		
-		xticks(ax, tick_rng);					% Tick marks %
-		yticks(ax, tick_rng);
-
-		%tick_lbl = zeros([length(tick_rng), 2]);	% Tick labels %
-		tick_lbl = tick_rng + this.peak_pos - peak_rad - 1;
-% 		for tk = 1:length(tick_rng)
-% 			tick_lbl(tk,:) = tick_rng(tk) + this.peak_pos - peak_rad - 1;
-% 		end
-		xticklabels(ax, {tick_lbl(1,:)});
-		yticklabels(ax, {flip(tick_lbl(2,:))});
-	end
-	function DispSpec(this, ax)
-	% Displays the image of the spectrum of this particle on the axes specified by 
-	% 'ax'. 
-	%
-	% To plot in a separate figure (or in your own axes), use:
-	% > figure;
-	% > [Particle Instance].DispSpec([Axes]);
-	%
-	% Additional considerations taken:
-	% + Grid
-	% + Title is "Spectrum Image"
-	% + Labeled colorbar with "Intensity (arb.)"
-	% + Axes labels
-	% + Tick marks are shifted to the (x,y) coordinates of the spectrum
-	%	------------------------------------------------------------------------	
-	%	Argument Definitions:
-	%	> ax:	(axes handle) The axes to display the image on
-	%			(~) The default will reference the 'Spectrum Image' axes 
-	
-		%% Argument Defaults %%
-		if(nargin < 2), ax = UI.axs(3); end	% Default to the SpecImg axes %
-		
-		%% Preliminaries %%
-		% Create the tick range %
-		peak_rad = floor( size(this.peak_img, 1)/2 );
-		ptk_rng = (0:5:2*peak_rad) + 1;
-		
-		%spec_sz = length(this.spec_rng);
-		stk_rng = 1:10:ceil(range(Particle.BND_PX));
-		
-		%% Refresh %%
-		cla(ax, 'reset');
-		
-		%% Plotting %%
-		imagesc(ax, this.spec_img);								% Plot the image %
-		
-																% No aspect ratio! %
-		grid(ax, 'on');											% Show grid %
-		
-		%% Labelling %%
-		title(ax, "Selected Spectrum Image");					% Title %
-		
-		cb = colorbar(ax);										% Colorbar %
-		cb.Label.String = "Intensity (arb.)";
-		
-		xlabel(ax, "X position (px)");							% Axis labels %
-		ylabel(ax, "Y position (px)");
-		
-		xticks(ax, stk_rng);									% Tick marks %
-		yticks(ax, ptk_rng);
-		
-		ptk_lbl = ptk_rng + this.peak_pos(2) - peak_rad - 1;	% Tick labels %
-		stk_lbl = stk_rng + round(Particle.BND_PX(1)) + this.peak_pos(1) - 1;
-
-		xticklabels(ax, {stk_lbl});
-		yticklabels(ax, {flip(ptk_lbl)});
-		
-	end
-	function DispPlot(this, ax)
-	% Displays a plot of the selection, background, signal, and fit of the spectrum
-	% of this particle on axes provided by 'ax'.
-	%
-	% To plot in a separate figure, use:
-	% > figure;
-	% > [Particle Instance].DispSpec(gca);
-	%
-	% Additional considerations taken:
-	% + Title is "Selected Spectrum"
-	% + Axes limits tight to the data
-	% + Grid
-	% + Axes labels
-	% + Wavelength / Energy plotting along the x-axis
-	% + Dynamic legend
-	%	------------------------------------------------------------------------	
-	%	Argument Definitions:
-	%	> ax:	(axes handle) The axes to display the image on
-	%			(~) The default will reference the 'Spectrum Plot' axes 
-	
-		%% Argument Defaults %%
-		if(nargin < 2), ax = UI.axs(4); end		% Default to the Spec Plot axes %
-		
-		%% Refresh %%
-		cla(ax, 'reset');
-		
-		%% Initialization %%		
-		% Check if we should even plot anything %
-		if(isempty(this.spec_plots))
-			text(ax, 0.40, 0.5, "Please fit spectra");
-			return;
-		end
-		
-		% Make the appropriate xgrid %
-		if(Particle.pltopt(1))
-			xgrid = this.RNG_EV;	% Use eV %
-		else
-			xgrid = this.RNG_NM;	% Use nm %
-		end
-		
-		% Initialize the legend %
-		leg = {};
-		
-		%% Plotting %%
-		% Plot the data on the xgrid %
-		hold(ax, 'on');
-		if(Particle.pltopt(6))	% Show Amplitude Threshold %
-			fill(ax, [min(xgrid), min(xgrid), max(xgrid), max(xgrid)], ...
-				sqrt(Particle.fitval(1)*this.pow_noise) * [-1, 1, 1, -1], ...
-				[1, 0.5, 0], 'EdgeColor', 'none', 'FaceAlpha', 0.2);
-			leg{end+1} = "Threshold";
-		end
-		if(Particle.pltopt(2))	% Show Selection %
-			plot(ax, xgrid, this.spec_plots(:,1), '--', 'Color', [0, 0, 1]);
-			leg{end+1} = "Selection";
-		end
-		if(Particle.pltopt(3))	% Show Outliers %
-			plot(ax, xgrid, this.spec_plots(:,2), '--', 'Color', [1, 0, 0]);
-			leg{end+1} = "Outliers";
-		end
-		if(Particle.pltopt(4))	% Show Signal %
-			fill(ax, [xgrid, flip(xgrid)], ...
-				[this.spec_plots(:,3)' + sqrt(this.pow_noise / Particle.fitval(1)), ...
-				flip(this.spec_plots(:,3)') - sqrt(this.pow_noise / Particle.fitval(1))], ...
-				[0.8, 0, 0.8], 'EdgeColor', 'none', 'FaceAlpha', 0.3, ...
-				'HandleVisibility', 'off');
-			
-			plot(ax, xgrid, this.spec_plots(:,3), 'Color', [0.8, 0, 0.8]);
-			leg{end+1} = "Signal";
-		end
-		if(Particle.pltopt(5))	% Show Fit Decomposition %
-			plot(ax, xgrid, [this.spec_fits.curve], '-', 'Color', [0, 0.8, 0], ...
-				'LineWidth', 2, 'HandleVisibility', 'off');
-		end
-		
-		plot(ax, xgrid, sum([this.spec_fits.curve], 2), 'k-', 'LineWidth', 2);
-		leg{end+1} = "Lorenztian Fit";
-		
-		hold(ax, 'off');
-		
-		axis(ax, 'tight');							% Tight axes limits %
-		grid(ax, 'on');								% Grid %
-		
-		% Add in the bells and whistles %
-		title(ax, "Spectrum Plot");					% Title %
-		
-		if(Particle.pltopt(1))	% Use eVs %				% Axis labels %
-			xlabel(ax, "Energy (eV)");
-		else
-			xlabel(ax, "Wavelength (nm)");			
-		end
-		ylabel(ax, "Intensity (arb.)");
-		
-		
-			
-		legend(ax, leg);							% Legend %
 	end
 end
 
 %% STATIC METHODS %%
 methods(Static)
+	%% CONVERSIONS %%
 	function [px] = S_NM2PX(nm, px_0, ord)
 	% Converts a given wavelength (in nm) to the corresponding pixel value based on
 	% the calibration.  The pixel offset 'px_0' represents the location of the zeroth
@@ -579,6 +384,249 @@ methods(Static)
 		nm = Particle.CAL_SLOPE * px + Particle.CAL_INTER;
 	end
 	
+	%% VISUALIZATION %%
+	function S_DispPeak(part, ax)
+	% Displays the image of the peak of the particle given by 'part' on the axes
+	% given by 'ax'.  Defaults to the MainWin's second axes.
+	%
+	% To plot in a separate figure, use:
+	% > figure;
+	% > Particle.S_DispPeak([Particle], gca);
+	%
+	% Additional considerations taken:
+	% + Aspect ratio is 1:1
+	% + Grid
+	% + Title is "Peak Image"
+	% + Labeled colorbar with "Intensity (arb.)"
+	% + Axes labels
+	% + Tick marks are shifted to the (x,y) coordinates of the peak
+	%	--------------------------------------------------------------------	
+	%	Argument Definitions:
+	%	> part:	(Particle) The particle whose information you want to display.
+	%			(~) If left empty, will write an error message to the plot
+	%
+	%	> ax:	(axes handle) The axes to display the image on
+	%			(~) The default will reference the 'Peak Image' axes 
+
+		%% Argument Defaults %%
+		if(nargin < 1), part = []; end		% Default to the error message %
+		if(nargin < 2), ax = UI.axs(2); end	% Default to the PeakImg axes %
+
+		%% Refresh the Axes %%
+		cla(ax, 'reset');
+
+		% Determine if there's a particle to plot %
+		if(isempty(part))
+			% Then output "Please select a particle" to the axes %
+			text(ax, 0.25, 0.5, "Please select a particle");
+
+			% We need say no more %
+			return;	
+		end
+
+		%% Preliminaries %%
+		% Create the tick range %
+		tick_rng = (0:5:2*Frame.winval(1)) + 1;
+
+		%% Plotting %%
+		imagesc(ax, part.peak_img);				% Plot the image %
+
+		axis(ax, 'image');						% 1:1 aspect ratio %
+		grid(ax, 'on');							% Show grid %
+
+		%% Labelling %%
+		title(ax, "Selected Peak Image");		% Title %
+
+		cb = colorbar(ax);						% Colorbar %
+		cb.Label.String = "Intensity (arb.)";
+
+		xlabel(ax, "X position (px)");			% Axis labels %
+		ylabel(ax, "Y position (px)");
+
+		xticks(ax, tick_rng);					% Tick marks %
+		yticks(ax, tick_rng);
+
+		tick_lbl = tick_rng + part.peak_pos - Frame.winval(1) - 1;	% Tick labels %
+		xticklabels(ax, {tick_lbl(1,:)});
+		yticklabels(ax, {flip(tick_lbl(2,:))});
+	end
+	function S_DispSpec(part, ax)
+	% Displays the image of the spectrum of the particle specified by 'part' on the 
+	% axes specified by 'ax'. 
+	%
+	% To plot in a separate figure, use:
+	% > figure;
+	% > Particle.DispSpec([Particle], gca);
+	%
+	% Additional considerations taken:
+	% + Grid
+	% + Title is "Spectrum Image"
+	% + Labeled colorbar with "Intensity (arb.)"
+	% + Axes labels
+	% + Tick marks are shifted to the (x,y) coordinates of the spectrum
+	%	------------------------------------------------------------------------	
+	%	Argument Definitions:
+	%	> part:	(Particle) The particle whose information you want to display.
+	%			(~) If left empty, will write an error message to the plot
+	%
+	%	> ax:	(axes handle) The axes to display the image on
+	%			(~) The default will reference the 'Spectrum Image' axes 
+	
+		%% Argument Defaults %%
+		if(nargin < 1), part = []; end		% Default to the error message % 
+		if(nargin < 2), ax = UI.axs(3); end	% Default to the SpecImg axes %
+		
+		%% Refresh %%
+		cla(ax, 'reset');
+
+		% Determine if there's a particle to plot %
+		if(isempty(part))
+			% Then output "Please select a particle" to the axes %
+			text(ax, 0.33, 0.5, "Please select a particle");
+
+			% We need say no more %
+			return;	
+		end
+		
+		%% Preliminaries %%
+		% Create the tick range %
+		ptk_rng = (0:5:2*Frame.winval(1)) + 1;
+		
+		stk_rng = 1:10:ceil(range(Particle.BND_PX));
+		
+		%% Plotting %%
+		imagesc(ax, part.spec_img);								% Plot the image %
+		
+																% No aspect ratio! %
+		grid(ax, 'on');											% Show grid %
+		
+		%% Labelling %%
+		title(ax, "Selected Spectrum Image");					% Title %
+		
+		cb = colorbar(ax);										% Colorbar %
+		cb.Label.String = "Intensity (arb.)";
+		
+		xlabel(ax, "X position (px)");							% Axis labels %
+		ylabel(ax, "Y position (px)");
+		
+		xticks(ax, stk_rng);									% Tick marks %
+		yticks(ax, ptk_rng);
+		
+		ptk_lbl = ptk_rng + part.peak_pos(2) - Frame.winval(1) - 1;	% Tick labels %
+		stk_lbl = stk_rng + round(Particle.BND_PX(1)) + part.peak_pos(1) - 1;
+
+		xticklabels(ax, {stk_lbl});
+		yticklabels(ax, {flip(ptk_lbl)});
+	end
+	function S_DispPlot(part, ax)
+	% Displays a plot of the selection, background, signal, and fit of the spectrum
+	% of the particle specified by 'part' on axes provided by 'ax'.
+	%
+	% To plot in a separate figure, use:
+	% > figure;
+	% > Particle.S_DispPlot([Particle], gca);
+	%
+	% Additional considerations taken:
+	% + Title is "Selected Spectrum"
+	% + Axes limits tight to the data
+	% + Grid
+	% + Axes labels
+	% + Wavelength / Energy plotting along the x-axis
+	% + Dynamic legend
+	%	------------------------------------------------------------------------	
+	%	Argument Definitions:
+	%	> part:	(Particle) The particle whose information you want to display.
+	%			(~) If left empty, will write an error message to the plot
+	%
+	%	> ax:	(axes handle) The axes to display the image on
+	%			(~) The default will reference the 'Spectrum Plot' axes 
+	
+		%% Argument Defaults %%
+		if(nargin < 1), part = []; end			% Default to the error message % 
+		if(nargin < 2), ax = UI.axs(4); end		% Default to the Spec Plot axes %
+		
+		%% Refresh %%
+		cla(ax, 'reset');
+		
+		%% Initialization %%		
+		% Check if we should even plot anything %
+		if(isempty(part))
+			text(ax, 0.40, 0.5, "Please fit spectra");
+			return;
+		elseif(isempty(part.spec_plots))
+			% Also nix it %
+			text(ax, 0.40, 0.5, "Please fit spectra");
+			return;
+		end
+		
+		% Make the appropriate xgrid %
+		if(Particle.pltopt(1))
+			xgrid = part.RNG_EV;	% Use eV %
+		else
+			xgrid = part.RNG_NM;	% Use nm %
+		end
+		
+		% Initialize the legend %
+		leg = {};
+		
+		%% Plotting %%
+		% Plot the data on the xgrid %
+		hold(ax, 'on');
+		if(Particle.pltopt(6))	% Show Amplitude Threshold %
+			fill(ax, [min(xgrid), min(xgrid), max(xgrid), max(xgrid)], ...
+				sqrt(Particle.fitval(1)*part.pow_noise) * [-1, 1, 1, -1], ...
+				[1, 0.5, 0], 'EdgeColor', 'none', 'FaceAlpha', 0.2);
+			leg{end+1} = "Threshold";
+		end
+		
+		if(Particle.pltopt(2))	% Show Selection %
+			plot(ax, xgrid, part.spec_plots(:,1), '--', 'Color', [0, 0, 1]);
+			leg{end+1} = "Selection";
+		end
+		
+		if(Particle.pltopt(3))	% Show Outliers %
+			plot(ax, xgrid, part.spec_plots(:,2), '--', 'Color', [1, 0, 0]);
+			leg{end+1} = "Outliers";
+		end
+		
+		if(Particle.pltopt(4))	% Show Signal %
+			fill(ax, [xgrid, flip(xgrid)], ...
+				[part.spec_plots(:,3)' + sqrt(part.pow_noise) / Particle.fitval(2), ...
+				flip(part.spec_plots(:,3)') - sqrt(part.pow_noise) / Particle.fitval(2)], ...
+				[0.8, 0, 0.8], 'EdgeColor', 'none', 'FaceAlpha', 0.3, ...
+				'HandleVisibility', 'off');
+			
+			plot(ax, xgrid, part.spec_plots(:,3), 'Color', [0.8, 0, 0.8]);
+			leg{end+1} = "Signal";
+		end
+		
+		if(Particle.pltopt(5))	% Show Fit Decomposition %
+			plot(ax, xgrid, [part.spec_fits.curve], '-', 'Color', [0, 0.8, 0], ...
+				'LineWidth', 2, 'HandleVisibility', 'off');
+		end
+		
+		% Plot the Total Lorenzian Fit %
+		plot(ax, xgrid, sum([part.spec_fits.curve], 2), 'k-', 'LineWidth', 2);
+		leg{end+1} = "Total Lorenztian Fit";
+		hold(ax, 'off');
+		
+		axis(ax, 'tight');							% Tight axes limits %
+		grid(ax, 'on');								% Grid %
+		
+		% Add in the bells and whistles %
+		title(ax, "Spectrum Plot");					% Title %
+		
+		if(Particle.pltopt(1))	% Use eVs %				% Axis labels %
+			xlabel(ax, "Energy (eV)");
+		else
+			xlabel(ax, "Wavelength (nm)");			
+		end
+		ylabel(ax, "Intensity (arb.)");
+		
+		legend(ax, leg);							% Legend %
+	end
+	
+	%% Fitting? %%
 	function [issue, err] = FitIssue(data, fit, thr)
 		fit_err = data - fit;
 		fit_issue = abs(fit_err) > thr;

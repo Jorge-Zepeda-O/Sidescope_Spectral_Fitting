@@ -63,12 +63,14 @@ UI.MakeParamSlider(MainWin, [0.40, 0.05, 0.15, 0.05], ['Filter ', char(963)], ..
 	[1, 3, 6], @sld_winpara_OnValueChanged, 2, false, '%4.2f(px)');
 
 % Sliders - Fit Parameters (Particle.fitval) %
-UI.MakeParamSlider(MainWin, [0.60, 0.15, 0.15, 0.05], "SNR Threshold", ...
-	[1, 3, 5, 1/40, 1/4], @sld_fitpara_OnValueChanged, 1, false, '%5.1f');
+UI.MakeParamSlider(MainWin, [0.60, 0.20, 0.15, 0.05], "SNR Threshold", ...
+	[1, 3, 5, 1/40, 1/4], @sld_fitpara_OnValueChanged, 1, false, '%3.1f');
+UI.MakeParamSlider(MainWin, [0.60, 0.15, 0.15, 0.05], "SNR Band", ...
+	[0.5, 1, 3, 1/25, 1/5], @sld_fitpara_OnValueChanged, 2, false, '%3.1f');
 UI.MakeParamSlider(MainWin, [0.60, 0.10, 0.15, 0.05], "Max Lorentzians", ...
-	[1, 2, 5, 0.25, 0.5], @sld_fitpara_OnValueChanged, 2, true, '%1.0f');
+	[1, 2, 5, 0.25, 0.5], @sld_fitpara_OnValueChanged, 3, true, '%1.0f');
 UI.MakeParamSlider(MainWin, [0.60, 0.05, 0.15, 0.05], "Fit Iterations", ...
-	[0, 10, 20, 0.05, 0.25], @sld_fitpara_OnValueChanged, 3, true, '%2.0f');
+	[0, 10, 20, 0.05, 0.25], @sld_fitpara_OnValueChanged, 4, true, '%2.0f');
 
 % List Boxes %
 UI.MakeListbox(MainWin, [0.42, 0.30, 0.12, 0.40], "Found Particles", ...
@@ -150,11 +152,11 @@ function menu_load_OnClick(parent, ~, ~)
 	UI.Ctrl_Enable("btn: Select Particles");
 	
 	% Show the Frame Slider if applicable %
-% 	if(framenum > 1)
-% 		UI.Ctrl_Set("sld: Frame Control", UI.ctrls, 'Max', framenum);
-% 		UI.Ctrl_Show("sld: Frame Control");
-% 		UI.Ctrl_Show("numlbl: Frame Control");
-% 	end
+	if(framenum > 1)
+		UI.Ctrl_Set("sld: Frame Control", UI.ctrls, 'Max', framenum);
+		UI.Ctrl_Show("sld: Frame Control");
+		UI.Ctrl_Show("numlbl: Frame Control");
+	end
 end
 function menu_plot_OnClick(parent, obj, arg)
 % Callback function that changes the appropriate plots when one of the Plotting
@@ -196,7 +198,7 @@ function menu_plot_OnClick(parent, obj, arg)
 	
 	% Display the currently selected particle's fit - if applicable %
 	if(~isempty(activeFrame.Particles))
-		activeFrame.Particles(activeFrame.actPar).DispPlot();
+		Particle.S_DispPlot(activeFrame.Particles(activeFrame.actPar));
 	elseif(strcmp(obj.Tag, "menu: Use eVs"))
 		% Change the x-axis label appropriately %
 		if(Particle.pltopt(1))		% Use eVs? %
@@ -245,24 +247,41 @@ function sld_frame_OnValueChanged(parent, obj, numlbl)
 	
 	% Check if there's been any selected particles - if not, return %
 	num_part = length(activeFrame.Particles);
-	if(num_part == 0), return; end
+	% Display the number of particles found - even if it's zero %
+	UI.Ctrl_Set("ttllbx: Found Particles", UI.ctrls, 'String', ...
+		join(["Found Particles:", num_part]));
 	
-	% Draw the box around each particle %
+	% Refresh the main axes and (maybe) draw a box around each particle %
 	activeFrame.DispBox();
 	
-	% Send the particle strings to the 'Found Particles' Listbox %
-	UI.Ctrl_Set("lbx: Found Particles", UI.ctrls, ...
-		'String', [activeFrame.Particles(:).str]);
-	
-	% Get the active Particle (as we also won't be modifying it any more) %
-	activeParticle = activeFrame.Particles(Particle.actidx);
-	
-	% Display the peak and spectrum images of the active particle %
-	activeParticle.DispPeak();	% 'Peak Image' axes %
-	activeParticle.DispSpec();	% 'Spectrum Image' axes %
-	
-	% Display the spectrum plot of the active particle %
-	activeParticle.DispPlot();	% 'Selected Spectrum' axes %
+	if(num_part == 0)
+		% Empty out the Found Particles listbox %
+		UI.Ctrl_Set("lbx: Found Particles", UI.ctrls, 'String', {});
+
+		% Clear out the peak and spectrum images %
+		Particle.S_DispPeak();
+		Particle.S_DispSpec();
+		
+		% Clear out the spectrum plot too %
+		Particle.S_DispPlot();
+	else
+		% Send the particle strings to the 'Found Particles' Listbox %
+		str_loc = [activeFrame.Particles(:).str_loc];
+		for p = 1:length(activeFrame.Particles)
+			str(p) = join(["Particle #", p, "@", str_loc(p)]);
+		end
+		UI.Ctrl_Set("lbx: Found Particles", UI.ctrls, 'String', str);
+
+		% Get the active Particle (as we also won't be modifying it any more) %
+		activeParticle = activeFrame.Particles(activeFrame.actPar);
+
+		% Display the peak and spectrum images of the active particle %
+		Particle.S_DispPeak(activeParticle);	% 'Peak Image' axes %
+		Particle.S_DispSpec(activeParticle);	% 'Spectrum Image' axes %
+
+		% Display the spectrum plot of the active particle %
+		Particle.S_DispPlot(activeParticle);	% 'Selected Spectrum' axes %
+	end
 end
 function sld_winpara_OnValueChanged(parent, obj, numlbl)
 % Callback for whenever a Window Parameter Slider has its value changed.  It must 
@@ -373,7 +392,7 @@ function sld_fitpara_OnValueChanged(~, obj, numlbl)
 		sprintf(numlbl.UserData.fcode(1:5), val), numlbl.UserData.fcode(6:end)]);
 end
 
-function btn_sel_OnClick(parent, ~, ~)
+function btn_sel_OnClick(parent)
 % Callback for the 'Select Particles' button click event.  It must clear off the
 % selection boxes on the main image, then prompt the user to select a region of
 % interest in order to obtain new particles.  Once done so, it draws boxes around
@@ -383,15 +402,37 @@ function btn_sel_OnClick(parent, ~, ~)
 %	> parent:	(MainWin) A reference to the Figure handle MainWin.  Useful for
 %		storing and keeping track of many different instance variables.
 
+	%% Appending Particles %%
+	% Check to see if we are indeed, *appending* particles instead of wiping them %
+	append = strcmp(parent.CurrentKey, 'shift');
+
 	%% Refresh %%
-	% Clear off the previous boxes, the listbox and the previous particles %
-	delete(UI.axs(1).Children(1:end-1));
-	parent.UserData.Frames(Frame.actidx).Particles = Particle.empty;
-	UI.Ctrl_Set("lbx: Found Particles", UI.ctrls, 'String', []);
+	% Make a *safe* reference to the children - mutations to children will affect
+	% UI.axs(1).Children.  Handles in MATLAB are the one object you can actually pass
+	% a reference to and it count, I think?
+	children = UI.axs(1).Children;
+	
+	if(append)
+		% Make all the boxes white for now, to indicate that we can add more %
+		for c = 1:length(children)-1
+			children(c).Color = [1, 1, 1];
+		end
+	else
+		% Clear off the previous boxes by making them invisible %
+		for c = 1:length(children)-1
+			children(c).Visible = 'off';
+		end
+	end
+	
+	% Clear out the listbox %
+	if(~append)
+		parent.UserData.Frames(Frame.actidx).Particles = Particle.empty;
+		UI.Ctrl_Set("lbx: Found Particles", UI.ctrls, 'String', []);
+	end
 
 	%% Select New Particles %%
 	% Function wrapper for selecting the particles in each frame %
-	parent.UserData.Frames(Frame.actidx).SelectROI();
+	parent.UserData.Frames(Frame.actidx).SelectROI(append);
 	
 	% Make sure to draw a box around every found particle and its spectrum %
 	parent.UserData.Frames(Frame.actidx).DispBox();
@@ -407,19 +448,34 @@ function btn_sel_OnClick(parent, ~, ~)
 	UI.Ctrl_Set("ttllbx: Found Particles", UI.ctrls, 'String', ...
 		join(["Found Particles:", length(activeFrame.Particles)]));
 	
-	% Show the active particle's peak and spectrum images %
-	activeFrame.Particles(activeFrame.actPar).DispPeak();
-	activeFrame.Particles(activeFrame.actPar).DispSpec();
+	% Determine if there's any particles around %
+	if(isempty(activeFrame.Particles))
+		% Prompt the user to select more particles %
+		Particle.S_DispPeak();
+		Particle.S_DispSpec();
+		Particle.S_DispPlot();
+		
+		% Deactivate the Fit Selection Button and deactivate the Export Data Button %
+		UI.Ctrl_Enable("btn: Fit Selection", UI.ctrls, false);
+		UI.Ctrl_Enable("btn: Export Data", UI.ctrls, false);
+	else
+		% For our sanity, make a reference to the active particle %
+		activeParticle = activeFrame.Particles(activeFrame.actPar);
+		
+		% Show the active particle's peak and spectrum images %
+		Particle.S_DispPeak(activeParticle);
+		Particle.S_DispSpec(activeParticle);
+		
+		% Show the active particle's spectrum plot if applicable %
+		Particle.S_DispPlot(activeParticle);
+
+		% Activate the Fit Selection Button and deactivate the Export Data Button %
+		UI.Ctrl_Enable("btn: Fit Selection");
+		UI.Ctrl_Enable("btn: Export Data", UI.ctrls, false);
+	end
 	
-	% Clear the spectrum plot axes %
-	cla(UI.axs(4), 'reset');
-	text(UI.axs(4), 0.4, 0.5, "Please fit spectra");
-	
-	% Activate the Fit Selection Button and deactivate the Export Data Button %
-	UI.Ctrl_Enable("btn: Fit Selection");
-	UI.Ctrl_Enable("btn: Export Data", UI.ctrls, false);
 end
-function btn_fit_OnClick(parent, ~, ~)
+function btn_fit_OnClick(parent)
 % Callback for the 'Fit Selection' button click event.  For all found particles, it
 % must first pick apart the spectrum image using a selection filter (a Gaussian) and
 % a background filter (1 - Gaussian) as well as make the "SNR filter", which we will
@@ -445,11 +501,12 @@ function btn_fit_OnClick(parent, ~, ~)
 	close(wb);
 	
 	%% UI Update %%
-	% Get the currently active frame %
+	% Get the currently active frame and particle %
 	activeFrame = parent.UserData.Frames(Frame.actidx);
+	activeParticle = activeFrame.Particles(activeFrame.actPar);
 	
 	% Display the currently selected fit %
-	activeFrame.Particles(activeFrame.actPar).DispPlot();
+	Particle.S_DispPlot(activeParticle);
 	
 	% Activate the "Export Data" button %
 	UI.Ctrl_Enable("btn: Export Data");
@@ -486,14 +543,14 @@ function lbx_found_OnValueChanged(parent, obj)
 	activeFrame.Particles(curVal).DispBox(UI.axs(1), true);	% Color green %
 	
 	% Plot the selected peak and spectrum images %
-	activeFrame.Particles(curVal).DispPeak();
-	activeFrame.Particles(curVal).DispSpec();
+	Particle.S_DispPeak(activeFrame.Particles(curVal));
+	Particle.S_DispSpec(activeFrame.Particles(curVal));
 	
 	% Plot the selected spectrum if available %
-	activeFrame.Particles(curVal).DispPlot();
+	Particle.S_DispPlot(activeFrame.Particles(curVal));
 end
 
-function btn_exp_OnClick(parent, ~, ~)
+function btn_exp_OnClick(parent)
 %
 %	----------------------------------------------------------------------------
 %	Argument Definitions

@@ -188,9 +188,9 @@ methods(Static)
 			% pass in a reference to parent, which is where we store relevant
 			% information
 			if(tog)
-				btn.Callback = @(src, evargs) cb(parent, btn);
+				btn.Callback = @(src, event) cb(parent, btn);
 			else
-				btn.Callback = @(src, evargs) cb(parent);
+				btn.Callback = @(src, event) cb(parent);
 			end
 		end
 		
