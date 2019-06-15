@@ -4,6 +4,8 @@ classdef Frame < handle
 %% CONSTANT VARIABLES %%
 properties(Constant)
 	MAGNIFICATION = 40
+    PIXEL_SIZE = 11     % um
+    SBAR_PX = 10 / (Frame.PIXEL_SIZE / Frame.MAGNIFICATION)
 end
 
 %% STATIC VARIABLES %%
@@ -13,16 +15,23 @@ end
 %	> winval:	[#] Array of numbers corresponding to the values of the window
 %		parameter sliders in MainWin (win_rad, win_sig)
 methods(Static)
-	function [value] = actidx(val, write)	% Active Index %
-		persistent actidx;
+	function [value] = opmode(val, write)	% Operation Mode %
+		persistent opmode;
 		
 		% Change behavior based on the number of input arguments - 1D arrays only %
-		if(nargin == 0)					% Spit out the entire array %
-			value = actidx;
-		elseif(nargin < 2 || ~write)	% Read out the specific index given by val % 
-			value = actidx(val);
-		elseif(write)					% Write to the value
-			actidx = val;
+		if(nargin == 0)				% Spit out the entire array %
+			value = opmode;
+		elseif(nargin == 1)			% Read out the specific index given by val % 
+			value = opmode(val);
+		else
+			% Check if 'write' is a boolean %
+			if(islogical(write))	% Write to the whole array %
+				opmode = val;
+			else					% Write to just the indices given in 'write' %
+				prev = Frame.opmode;
+				prev(write) = val;
+				opmode = prev;
+			end
 		end
 	end
 	function [value] = winval(val, write)	% Window Values %
@@ -45,39 +54,54 @@ methods(Static)
 		end
 	end
 	
+	function [value] = actidx(val, write)	% Active Index %
+		persistent actidx;
+		
+		% Change behavior based on the number of input arguments - 1D arrays only %
+		if(nargin == 0)					% Spit out the entire array %
+			value = actidx;
+		elseif(nargin < 2 || ~write)	% Read out the specific index given by val % 
+			value = actidx(val);
+		elseif(write)					% Write to the value
+			actidx = val;
+		end
+	end
+	
 	%% REFRESH %%
 	function REFRESH()
 	% Clears all static variables of their values and prepares the class for use
 	
-		%% Refresh Indicies %%
-		Frame.actidx([], true);		% Active indices %
+		%% Refresh Options %%
+		Frame.opmode([], true);		% Operation Mode %
 	
 		%% Refresh Values %%
 		Frame.winval([], true);		% Window Values %
+		Frame.actidx([], true);		% Active Index %
 	end
 end
 
 %% DYNAMIC VARIABLES %%
 properties
 	%% File Handling %%
-	file_folder	% ("str")	The location of the file %
-	file_name	% ("str")	The name of the file (including extension) %
+	file_folder	% ("str")	The location of the file
+	file_name	% ("str")	The name of the file (including extension)
 	
 	%% Thresholds %%
-	thr_det		% (#)	The detection threshold %
-	thr_sig		% (#)	The signal threshold %
+	thr_det		% (#)	The detection threshold
+	thr_sig		% (#)	The signal threshold
 	
 	%% Images %%
 	img			% [[x,y]] The image to analyze %
-	img_det		% [[x,y]] The image to analyze, but everything below 'thr_det' = 0 %
-	img_sig		% [[x,y]] The image to analyze, but everything below 'thr_sig' = 0 %
+	img_det		% [[x,y]] The image to analyze, but everything below 'thr_det' = 0
+	img_sig		% [[x,y]] The image to analyze, but everything below 'thr_sig' = 0
 	
 	%% Spectrum %%
-	spec_bg		% [#]	An array of values corresponding to the background spectrum %
+	spec_bg		% [#]	An array of values corresponding to the background spectrum
 	
 	%% Children %%
-	Particles	% [Particle]	An array of Particles identified in the ROI %
+	Particles	% [Particle]	An array of Particles identified in the ROI
 	actPar		% [#]	An array of indicides corresponding to the active Particles
+	lbx_str		% {"str"}
 end
 
 %% DYNAMIC METHODS %%
@@ -185,7 +209,7 @@ methods
 		this.spec_bg = mean(slice_valid, 2);
 	end
 	
-	function SelectROI(this, append)
+	function SelectROI(this, roi)
 	% This function prompts the user to select a Region of Interest (ROI) of the
 	% Frame.  This ROI is then analyzed for particles, and a series of Particle
 	% objects are created and attributed to this Frame.
@@ -193,17 +217,22 @@ methods
 	%	Argument Definitions:
 	%	> parent:	(MainWin) A reference to the Figure handle MainWin.  Useful for
 	%		storing and keeping track of many different instance variables.
+	%
+		%% Argument Defaults %%
+		if(nargin < 2), roi = 0; end
 	
 		%% Refresh %%
 		% If we're not appending to the current particle array, or its empty
-		if(~append || isempty(this.Particles))
+		if(isempty(this.Particles))
 			% Refresh the Particles field with an empty Particle array %
 			this.Particles = Particle.empty;
 		end
 	
 		%% User-Input %%
-		% Prompt the user to select a rectangular Region of Interest (ROI) %
-		roi = round(getrect(UI.axs(1)));
+		if(isscalar(roi))
+			% Prompt the user to select a rectangular Region of Interest (ROI) %
+			roi = round(getrect(UI.axs(1)));
+		end
 		
 		% Locate the ROI in the stored image %
 		roi_x = roi(1) + (1:roi(3));	% x pos + width %
@@ -266,14 +295,10 @@ methods
 		% This can be a time-intensive process; create a waitbar %
 		wb = waitbar(0, "Finding Particles...");
 		
-		lbx_str = {};
-		if(append)
-			pnum = length(this.Particles);
-			for p = 1:pnum
-				lbx_str{p} = join(["Particle #", p, "@", this.Particles(p).str_loc]);
-			end
-		else
-			pnum = 0;
+		pnum = length(this.Particles);
+		this.lbx_str = cell([pnum, 1]);
+		for p = 1:pnum
+			this.lbx_str{p} = join(["Particle #", p, "@", this.Particles(p).str_loc]);
 		end
 		
 		% For each found peak, create a child Particle %
@@ -295,16 +320,15 @@ methods
 				continue; 
 			end
 
-			if(append)
-				% Check to see if this particle already exists %
-				if(any(any(part.peak_pos(1) == [this.Particles(:).peak_pos])) && ...
-					any(any(part.peak_pos(2) == [this.Particles(:).peak_pos])))
-					% Don't add it in, it's already here %
-					continue;
-				end
+			% Check to see if this particle already exists %
+			if(any(any(part.peak_pos(1) == [this.Particles(:).peak_pos])) && ...
+				any(any(part.peak_pos(2) == [this.Particles(:).peak_pos])))
+				% Don't add it in, it's already here %
+				continue;
 			end
+			
 			pnum = pnum + 1;
-			lbx_str{pnum} = join(["Particle #", pnum, "@", part.str_loc]);
+			this.lbx_str{pnum} = join(["Particle #", pnum, "@", part.str_loc]);
 
 			% Append this particle to the Frame's particle list %
 			this.Particles(pnum) = part;
@@ -315,14 +339,9 @@ methods
 		%% MainWin Update %%
 		% Activate the first particle found %
 		this.actPar = 1;
-		
-		% Listbox updates %		
-		lbx = UI.FindObject("lbx: Found Particles");	% Get the Listbox %
-		lbx.String = lbx_str;		% Makes the Listbox have an item per Particle %
-		lbx.Value = 1;				% Sets the current item to the first one %
 	end
 	function FitROI(this, wb)
-	% Function that fits all particles in the ROI with multiple Lorentzians.  In the
+	% Function that fits all particles in the ROI with multiple peaks.  In the
 	% process
 		%% Image Analysis %%		
 		% Get the noise power, which is just its variance in what we didn't detect %
@@ -357,9 +376,15 @@ methods
 			this.Particles(p).Fit_Spectrum(filt_wgt, xrng, this.spec_bg, pow_noise);
 			
 			% Update the waitbar %
-			waitbar(p / length(this.Particles), wb, ...
-				join(["Fitting Spectra (", p, "/", length(this.Particles), ")"]));
+			waitbar(wb.UserData(2)/wb.UserData(3), wb, ...
+				join(["Fitting Spectra ( Frame", wb.UserData(1), ":", ...
+				p, "/", length(this.Particles), ")"]));
+			
+			% Increment the particle fit counter %
+			wb.UserData(2) = wb.UserData(2) + 1;
 		end
+		% Increment the frame number counter %
+		wb.UserData(1) = wb.UserData(1) + 1;
 	end
 	
 	%% VISUALIZATION %%
@@ -383,7 +408,7 @@ methods
 		%% Refresh %%
 		% Wipe off all the boxes previously there %
 		children = ax.Children;
-		for c = 1:length(children)-1
+		for c = 1:length(children)-3
 			children(c).Visible = 'off';
 		end
 		%cla(ax, 'reset');
@@ -407,6 +432,16 @@ methods
 		
 		xlabel(ax, "X position (px)");				% Axes labels %
 		ylabel(ax, "Y position (px)");
+        
+        %% Scale Bar %%
+		if(Particle.visopt(1))
+			line(ax, size(this.img, 1)*(0.20) + [0,Frame.SBAR_PX], ...
+				size(this.img, 1)*(1-0.06) + [0,0], ...
+				'Color', 'w', 'LineWidth', 3);
+			text(ax, size(this.img, 1)*(0.20) + Frame.SBAR_PX/2, ...
+				size(this.img, 1)*(1-0.08), "10\mum", ...
+				'Interpreter', 'tex', 'Color', 'w', 'HorizontalAlignment', 'center');
+		end
 	end
 	function DispBox(this, ax)
 	% Draws boxes around all particles selected in this frame
@@ -423,7 +458,7 @@ methods
 		children = ax.Children;
 		
 		% Make invisible any previous boxes %
-		for c = 1:length(children)-1
+		for c = 1:length(children)-3
 			children(c).Visible = 'off';
 		end
 		

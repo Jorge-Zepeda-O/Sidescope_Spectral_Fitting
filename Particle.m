@@ -4,16 +4,16 @@ classdef Particle < handle
 %% CONSTANT VARIABLES %%
 properties(Constant)
 	% Physical Constants %
-	HC = (6.626E-34 * 2.998E8) * (1E9/1.602E-19);	% hw (ev) = hc / lambda (nm) %
+	HC = (6.626E-34 * 2.998E8) * (1E9/1.602E-19);	% hw (ev) = hc / lambda (nm)
 	
 	% Spectral calibration %
-	CAL_SLOPE = 1.927	% Calibration slope (nm) %
-	CAL_INTER = -1.7313 % Calibration intercept (nm) %
+	CAL_SLOPE = 1.927	% Calibration slope (nm)
+	CAL_INTER = -1.7313 % Calibration intercept (nm)
 	
 	% Spectral bounds %
-	BND_EV = [1.5, 3.0]								% Bounds in eV %
-	BND_NM = Particle.HC ./ flip(Particle.BND_EV)	% Bounds in nm %
-	BND_PX = Particle.S_NM2PX(Particle.BND_NM);		% Bounds in px (not offset) %
+	BND_EV = [1.5, 3.0]								% Bounds in eV
+	BND_NM = Particle.HC ./ flip(Particle.BND_EV)	% Bounds in nm
+	BND_PX = Particle.S_NM2PX(Particle.BND_NM);		% Bounds in px (not offset)
 	
 	% Spectral ranges %
 	RNG_PX = round(Particle.BND_PX(1)):round(Particle.BND_PX(2));
@@ -22,32 +22,33 @@ properties(Constant)
 end
 
 %% STATIC VARIABLES %%
-%	> pltopt:	[bool]	Array of boolean values to determine various plotting options
+%	> visopt:	[bool]	Array of boolean values to determine various plotting options
 %		(show_ev, show_bg, show_sig)
 %
 %	> fitval:	[#]		Array of numbers corresponding to the values of the fitting
 %		parameter sliders in MainWin (fit_snr, fit_tol, fit_lor, fit_itr)
 methods(Static)
-	function [value] = pltopt(val, write)	% Plotting Options %
-		persistent pltopt;
+	function [value] = visopt(val, write)	% Plotting Options %
+		persistent visopt;
 		
 		% Change behavior based on the number of input arguments - 1D arrays only %
 		if(nargin == 0)				% Spit out the entire array %
-			value = pltopt;
+			value = visopt;
 		elseif(nargin == 1)			% Read out the specific index given by val % 
-			value = pltopt(val);
+			value = visopt(val);
 		else
 			% Check if 'write' is a boolean %
 			if(islogical(write))	% Write to the whole array %
-				pltopt = val;
+				visopt = val;
 			else					% Write to just the indices given in 'write' %
-				prev = Particle.pltopt;
+				prev = Particle.visopt;
 				prev(write) = val;
-				pltopt = prev;
+				visopt = prev;
 			end
 		end
 	end
-	function [value] = fitval(val, write)	% Fitting Options %
+	
+	function [value] = fitval(val, write)	% Fitting Values %
 		persistent fitval;
 		
 		% Change behavior based on the number of input arguments - 1D arrays only %
@@ -72,8 +73,10 @@ methods(Static)
 	% Clears all static variables of their values and prepares the class for use
 		
 		%% Refresh Options %%
-		Particle.pltopt([], true);		% Plotting Options %
-		Particle.fitval([], true);		% Fitting Options %
+		Particle.visopt([], true);		% Plotting Options %
+		
+		%% Refresh Values %%
+		Particle.fitval([], true);		% Fitting Values %
 	end
 end
 
@@ -182,63 +185,28 @@ methods
 		% The signal we're interested in is the soft-threshold between the selected
 		% spectrum and the background spectrum, hereby dubbed the signal spectrum
 		%spec_sig = max(spec_wgt(:,1) - spec_wgt(:,2), 0);
-		spec_sig = spec_wgt(:,1) - spec_wgt(:,2);
+		spec_sig = max(spec_wgt(:,1), 0);% - spec_wgt(:,2);
 		
 		% Pass these in to the spec_plots %
 		this.spec_plots = [spec_wgt, spec_sig];
 		
-		%% Multiple Lorentzian Fitting %%		
-		% Initialize the vector arrays for the fits and the parameters.  Note that
-		% the domain is over the nm range.
+		%% Multiple Lorentzian Fitting %%
+		% Fit all the lorentzians at once %
 		numfits = Particle.fitval(3);
-		this.spec_fits = Fit.empty;
-		for f = 1:numfits
-			this.spec_fits(f) = Fit(Particle.RNG_NM, 3, f == 1);
-		end
-
-		% Check if we're only attempting to fit one peak %
-		if(numfits == 1)
-			% Fit one and done %
-			this.spec_fits.Fit_Lorentzian(spec_sig);
+		spec_fit = Fit((Particle.RNG_EV), 3, true);
+		
+		% Determine the peak function we will use to perform the fit %
+		if(Frame.opmode(3))
+			% Allow Lorentzian-Gaussian interpolation %
+			fit_fxn = "Gaurentzian";
 		else
-			% Repeat for the specified number of iterations... %
-			for i = 1:Particle.fitval(4)
-				% Repeat for each Lorentzian involved... %
-				for l = 1:numfits
-					% Get the sum-fit for all *other* Lorentizans %
-					fit_other = sum([this.spec_fits([1:numfits] ~= l).curve], 2);
-
-					% Get the error of fit_other with the raw data %				
-					[issue, fit_err] = Particle.FitIssue(spec_sig, fit_other, ...
-						sqrt(pow_noise) / Particle.fitval(2));
-					if(~issue)
-						if(~this.spec_fits(l).isActive)
-							continue;
-						else
-							break;
-						end
-					end
-
-					% Use the fit error to re-fit this Lorentzian %
-					this.spec_fits(l).Fit_Lorentzian(fit_err);
-
-					% If this fit doesn't really matter too much, nuke it %
-					if(this.spec_fits(l).param(3)^2 < Particle.fitval(1)*pow_noise)
-						this.spec_fits(l).isActive = false;
-						this.spec_fits(l).Refresh();
-					else
-						this.spec_fits(l).isActive = true;
-					end
-				end
-				
-				% If there's only one Lorentzian left, we've already done our best
-				% fit, so break out.
-				if(sum([this.spec_fits.isActive]) == 1), break; end
-			end
-			
-			% Weed out the useless Lorenztians %
-			this.spec_fits = this.spec_fits([this.spec_fits.isActive]);
+			% Use only Lorentzians%
+			fit_fxn = "Lorentzian";
 		end
+		spec_fit.Fit_Peaks(fit_fxn, spec_sig, numfits, Frame.opmode(4));
+		
+		% Assign %
+		this.spec_fits = spec_fit;
 	end
 	
 	%% VISUALIZATION %%
@@ -299,9 +267,9 @@ end
 %% STATIC METHODS %%
 methods(Static)
 	%% CONVERSIONS %%
-	function [px] = S_NM2PX(nm, px_0, ord)
+	function [px] = S_NM2PX(nm, pmu, ord)
 	% Converts a given wavelength (in nm) to the corresponding pixel value based on
-	% the calibration.  The pixel offset 'px_0' represents the location of the zeroth
+	% the calibration.  The pixel offset 'pmu' represents the location of the zeroth
 	% order diffraction, and is optional.  Options to include the nth order
 	% diffraction position are also included in 'ord'
 	%	------------------------------------------------------------------------
@@ -309,7 +277,7 @@ methods(Static)
 	%	> nm:	[#] A vector of values to find the pixel location of the nth order
 	%		diffraction of
 	%
-	%	~ px_0:	(#)	A value that determines how far offset the pixels should be from
+	%	~ pmu:	(#)	A value that determines how far offset the pixels should be from
 	%		the zeroth order diffraction.
 	%			(~) Defaults to 0
 	%
@@ -322,7 +290,7 @@ methods(Static)
 	%		nth order diffraction
 	
 		%% Arugment Defaults %%
-		if(nargin < 2), px_0 = 0; end	% Default to centered zeroth order %
+		if(nargin < 2), pmu = 0; end	% Default to centered zeroth order %
 		if(nargin < 3), ord = 1; end	% Default to first order diffraction %
 		
 		%% Procedure %%
@@ -336,14 +304,14 @@ methods(Static)
 		end
 		
 		% Determine if we need to apply an offset for the zeroth order %
-		if(px_0 ~= 0)
+		if(pmu ~= 0)
 			% Offset accordingly %
-			px = px + px_0;
+			px = px + pmu;
 		end
 	end
-	function [nm] = S_PX2NM(px, px_0, ord)
+	function [nm] = S_PX2NM(px, pmu, ord)
 	% Converts a given pixel position to the corresponding wavelength (nm) value 
-	% based on the calibration.  The pixel offset 'px_0' represents the location of 
+	% based on the calibration.  The pixel offset 'pmu' represents the location of 
 	% the zeroth order diffraction, and is optional.  Options to include the nth 
 	% order diffraction position are also included in 'ord'
 	%	------------------------------------------------------------------------
@@ -351,7 +319,7 @@ methods(Static)
 	%	> px:	[#] A vector of values to find the wavelength value at the nth order
 	%		diffraction
 	%
-	%	~ px_0:	(#)	A value that determines how far offset the pixels should be from
+	%	~ pmu:	(#)	A value that determines how far offset the pixels should be from
 	%		the zeroth order diffraction.
 	%			(~) Defaults to 0
 	%
@@ -364,14 +332,14 @@ methods(Static)
 	%		nth order diffraction
 	
 		%% Arugment Defaults %%
-		if(nargin < 2), px_0 = 0; end	% Default to centered zeroth order %
+		if(nargin < 2), pmu = 0; end	% Default to centered zeroth order %
 		if(nargin < 3), ord = 1; end	% Default to first order diffraction %
 		
 		%% Procedure %%
 		% Determine if we need to adjust for the zeroth order offset %
-		if(px_0 ~= 0)
+		if(pmu ~= 0)
 			% Shift it accordingly %
-			px = px - px_0;
+			px = px - pmu;
 		end
 		
 		% Determine if we are looking at a higher order diffraction %
@@ -449,6 +417,16 @@ methods(Static)
 		tick_lbl = tick_rng + part.peak_pos - Frame.winval(1) - 1;	% Tick labels %
 		xticklabels(ax, {tick_lbl(1,:)});
 		yticklabels(ax, {flip(tick_lbl(2,:))});
+		
+		%% Scale Bar %%
+		if(part.visopt(1))
+			line(ax, size(part.spec_img, 1)*(0.10) + [0,Frame.SBAR_PX/10], ...
+				size(part.spec_img, 1)*(1-0.06) + [0,0], ...
+				'Color', 'w', 'LineWidth', 3);
+			text(ax, size(part.spec_img, 1)*(0.10) + Frame.SBAR_PX/20, ...
+				size(part.spec_img, 1)*(1-0.14), "1\mum", ...
+				'Interpreter', 'tex', 'Color', 'w', 'HorizontalAlignment', 'center');
+		end
 	end
 	function S_DispSpec(part, ax)
 	% Displays the image of the spectrum of the particle specified by 'part' on the 
@@ -464,6 +442,7 @@ methods(Static)
 	% + Labeled colorbar with "Intensity (arb.)"
 	% + Axes labels
 	% + Tick marks are shifted to the (x,y) coordinates of the spectrum
+	% + 10um scale bar
 	%	------------------------------------------------------------------------	
 	%	Argument Definitions:
 	%	> part:	(Particle) The particle whose information you want to display.
@@ -497,7 +476,7 @@ methods(Static)
 		%% Plotting %%
 		imagesc(ax, part.spec_img);								% Plot the image %
 		
-		axis(ax, 'image');						% 1:1 aspect ratio %
+		%axis(ax, 'image');						% 1:1 aspect ratio %
 																% No aspect ratio! %
 		grid(ax, 'on');											% Show grid %
 		
@@ -518,6 +497,29 @@ methods(Static)
 
 		xticklabels(ax, {stk_lbl});
 		yticklabels(ax, {flip(ptk_lbl)});
+		
+		%% Visual Lines %%
+		% Scale Bar %
+		if(part.visopt(1))
+			line(ax, size(part.spec_img, 2)*(0.05) + [0,Frame.SBAR_PX], ...
+				size(part.spec_img, 1)*(1-0.06) + [0,0], ...
+				'Color', 'w', 'LineWidth', 3);
+			text(ax, size(part.spec_img, 2)*(0.05) + Frame.SBAR_PX/2, ...
+				size(part.spec_img, 1)*(1-0.14), "10\mum", ...
+				'Interpreter', 'tex', 'Color', 'w', 'HorizontalAlignment', 'center');
+		end
+		
+		% Filter Lines %
+		if(part.visopt(2))
+			line_colors = ['g', 'y', 'r'];
+			line_styles = ["-", "--", ":"];
+			for l = -2:2
+				line(ax, size(part.spec_img,2)*[0,1], ...
+					(Frame.winval(1)+1) + l*Frame.winval(2)*[1,1], ...
+					'Color', line_colors(abs(l)+1), 'LineStyle', line_styles(abs(l)+1), ...
+					'LineWidth', 2-abs(l)/2);
+			end
+		end
 	end
 	function S_DispPlot(part, ax)
 	% Displays a plot of the selection, background, signal, and fit of the spectrum
@@ -561,7 +563,7 @@ methods(Static)
 		end
 		
 		% Make the appropriate xgrid %
-		if(Particle.pltopt(1))
+		if(Particle.visopt(3))
 			xgrid = part.RNG_EV;	% Use eV %
 		else
 			xgrid = part.RNG_NM;	% Use nm %
@@ -572,55 +574,66 @@ methods(Static)
 		
 		%% Plotting %%
 		% Plot the data on the xgrid %
-		hold(ax, 'on');
-		if(Particle.pltopt(6))	% Show Amplitude Threshold %
-			fill(ax, [min(xgrid), min(xgrid), max(xgrid), max(xgrid)], ...
-				sqrt(Particle.fitval(1)*part.pow_noise) * [-1, 1, 1, -1], ...
-				[1, 0.5, 0], 'EdgeColor', 'none', 'FaceAlpha', 0.2);
-			leg{end+1} = "Threshold";
-		end
-		
-		if(Particle.pltopt(2))	% Show Selection %
-			plot(ax, xgrid, part.spec_plots(:,1), '--', 'Color', [0, 0, 1]);
+		hold(ax, 'on');		
+		% Show Selection & Outliers %
+		if(Particle.visopt(4))
+			plot(ax, xgrid, part.spec_plots(:,1), '.', 'Color', [0, 0, 1]);
 			leg{end+1} = "Selection";
-		end
-		
-		if(Particle.pltopt(3))	% Show Outliers %
-			plot(ax, xgrid, part.spec_plots(:,2), '--', 'Color', [1, 0, 0]);
+			
+			plot(ax, xgrid, part.spec_plots(:,2), '.', 'Color', [1, 0, 0]);
 			leg{end+1} = "Outliers";
 		end
 		
-		if(Particle.pltopt(4))	% Show Signal %
+		% Show Signal %
+		if(Particle.visopt(5))
 			fill(ax, [xgrid, flip(xgrid)], ...
 				[part.spec_plots(:,3)' + sqrt(part.pow_noise) / Particle.fitval(2), ...
 				flip(part.spec_plots(:,3)') - sqrt(part.pow_noise) / Particle.fitval(2)], ...
 				[0.8, 0, 0.8], 'EdgeColor', 'none', 'FaceAlpha', 0.3, ...
 				'HandleVisibility', 'off');
 			
-			plot(ax, xgrid, part.spec_plots(:,3), 'Color', [0.8, 0, 0.8]);
+			plot(ax, xgrid, part.spec_plots(:,3), ':', 'Color', [0.8, 0, 0.8]);
 			leg{end+1} = "Signal";
 		end
 		
-		if(Particle.pltopt(5))	% Show Fit Decomposition %
-			plot(ax, xgrid, [part.spec_fits.curve], '-', 'Color', [0, 0.8, 0], ...
-				'LineWidth', 2, 'HandleVisibility', 'off');
+		% Show Total Fit %
+		plot(ax, xgrid, sum([part.spec_fits.curves], 2), '-', 'Color', [0.5, 0, 0.5], 'LineWidth', 2);
+		if(Frame.opmode(3))
+			leg{end+1} = "Total Lorentzian-Gaussian Fit";
+		else
+			leg{end+1} = "Total Lorentzian Fit";
 		end
 		
-		% Plot the Total Lorenzian Fit %
-		plot(ax, xgrid, sum([part.spec_fits.curve], 2), 'k-', 'LineWidth', 2);
-		leg{end+1} = "Total Lorenztian Fit";
+		% Show Fit Decomposition %
+		if(Particle.visopt(6))
+			if(Frame.opmode(3) && Particle.visopt(7)) % Hybridzation + Colors %
+				color = [0, 0.5, 0] + ([0, 0.5, 0]'*part.spec_fits.params(1,:))';
+			else
+				color = [0, 0.8, 0];
+			end
+			curves = [part.spec_fits.curves];
+			for c = 1:size(curves, 2)
+				plot(ax, xgrid, curves(:,c), '--', 'Color', color(c,:), ...
+					'LineWidth', 2, 'HandleVisibility', 'off');
+			end
+			
+		end
 		hold(ax, 'off');
 		
+		%% Labelling %%
 		axis(ax, 'tight');							% Tight axes limits %
 		grid(ax, 'on');								% Grid %
 		
 		% Add in the bells and whistles %
-		title(ax, "Spectrum Plot");					% Title %
+		title(ax, sprintf("Spectrum for particle at (%4.0d,%4.0d)", ...	% Title %
+			part.peak_pos(1), part.peak_pos(2)));
 		
-		if(Particle.pltopt(1))	% Use eVs %				% Axis labels %
+		if(Particle.visopt(3))	% Use eVs %				% Axis labels %
 			xlabel(ax, "Energy (eV)");
+			xticks(ax, ceil(min(xgrid)/0.1)*0.1:0.1:floor(max(xgrid)/0.1)*0.1);
 		else
-			xlabel(ax, "Wavelength (nm)");			
+			xlabel(ax, "Wavelength (nm)");
+			xticks(ax, ceil(min(xgrid)/50)*50:50:floor(max(xgrid)/50)*50);
 		end
 		ylabel(ax, "Intensity (arb.)");
 		
@@ -628,7 +641,7 @@ methods(Static)
 	end
 	
 	%% Fitting? %%
-	function [issue, err] = FitIssue(data, fit, thr)
+	function [issue, err, fit_issue] = FitIssue(data, fit, thr)
 		fit_err = data - fit;
 		fit_issue = abs(fit_err) > thr;
 		

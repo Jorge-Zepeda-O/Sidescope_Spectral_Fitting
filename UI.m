@@ -105,14 +105,15 @@ end
 %% STATIC METHODS %%
 methods(Static)
 	%% CONTROL CREATION %%
-	function [menu] = MakeMenu(mainwin, parent, txt, cb, arg, chk, sep)
+	function [menu] = MakeMenu(parent, txt, cb, arg, chk, sep)
 		%% Argument Defaults %%
-		if(nargin < 5), arg = 0; end		% Default to no argument %
-		if(nargin < 6), chk = false; end	% Default to unchecked %
-		if(nargin < 7), sep = false; end	% Default to not a separator item %
+		if(nargin < 4), arg = 0; end		% Default to no argument %
+		if(nargin < 5), chk = false; end	% Default to unchecked %
+		if(nargin < 6), sep = false; end	% Default to not a separator item %
 
 		%% Initialize %%
 		menu = uimenu(parent, 'Text', txt, 'Tag', join(["menu:", txt]));
+		mainwin = parent.Parent;
 
 		% Is this menuitem checked? %
 		if(chk)
@@ -129,7 +130,7 @@ methods(Static)
 		end
 		
 		% Callback assignment %
-		if(nargin > 3)
+		if(nargin > 2)
 			menu.Callback = @(src, event) cb(mainwin, src, arg);
 		end
 		
@@ -165,13 +166,15 @@ methods(Static)
 		if(nargout == 0), clear ax; end
 	end
 
-	function [btn] = MakeButton(parent, pos, string, cb, en, tog)
+	function [btn] = MakeButton(parent, pos, string, cb, en, tog, arg)
 	% Makes a button UI control in 'parent' with normalized position 'position'.  The
 	% button contains text specified by 'string', and calls 'callback' when pressed
 
 		%% Argument Defaults %%
 		if(nargin < 5), en = true; end		% Defaults to enabled buttons %
 		if(nargin < 6), tog = false; end	% Defaults to PushButtons %
+		if(nargin < 7), arg = false; end
+		if(nargin < 8), vis = true; end
 
 		%% Initialization %%
 		if(tog), buttonType = 'Togglebutton'; else, buttonType = 'Pushbutton'; end
@@ -191,9 +194,9 @@ methods(Static)
 			% pass in a reference to parent, which is where we store relevant
 			% information
 			if(tog)
-				btn.Callback = @(src, event) cb(parent, btn);
+				btn.Callback = @(src, event) cb(parent, btn, arg);
 			else
-				btn.Callback = @(src, event) cb(parent);
+				btn.Callback = @(src, event) cb(parent, arg);
 			end
 		end
 		
@@ -202,6 +205,13 @@ methods(Static)
 			btn.Enable = 'on';
 		else
 			btn.Enable = 'off';
+		end
+		
+		% Determine if we need to hide this control for now %
+		if(~arg)
+			btn.Visible = 'on';
+		else
+			btn.Visible = 'off';
 		end
 		
 		%% UI Update %%
