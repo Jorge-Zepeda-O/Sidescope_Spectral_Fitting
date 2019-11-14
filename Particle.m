@@ -98,6 +98,8 @@ properties
 	peak_lines	% [line] Array of lines that define the box around the peak image %
 	spec_lines	% [line] Array of lines that define the box around the spectrum img %
 	filt_lines	% [line] Array of lines that show where the selection box is %
+	
+	snr
 end
 
 %% DEPENDENT VARIABLES %%
@@ -182,13 +184,15 @@ methods
 		% Obtain the two integrations at once using linear algebra %
 		spec_wgt = spec_sub' * filt_wgt;	% (plot, filter #) %
 		
+		spec_sel = this.spec_img' * filt_wgt;
+		
 		% The signal we're interested in is the soft-threshold between the selected
 		% spectrum and the background spectrum, hereby dubbed the signal spectrum
 		%spec_sig = max(spec_wgt(:,1) - spec_wgt(:,2), 0);
-		spec_sig = max(spec_wgt(:,1), 0);% - spec_wgt(:,2);
+		spec_sig = max(spec_wgt, 0);% - spec_wgt(:,2);
 		
 		% Pass these in to the spec_plots %
-		this.spec_plots = [spec_wgt, spec_sig];
+		this.spec_plots = [spec_sel, spec_bg(logical(bg_loc)), spec_sig];
 		
 		%% Multiple Lorentzian Fitting %%
 		% Fit all the lorentzians at once %
@@ -207,6 +211,13 @@ methods
 		
 		% Assign %
 		this.spec_fits = spec_fit;
+		
+		% Compute SNR %
+		if(Frame.opmode(3))
+			this.snr = mean(spec_fit.params(4,:)) ./ std(sum(spec_fit.curves,2) - spec_sig);
+		else
+			this.snr = mean(spec_fit.params(3,:)) ./ std(sum(spec_fit.curves,2) - spec_sig);
+		end
 	end
 	
 	%% VISUALIZATION %%
@@ -416,7 +427,7 @@ methods(Static)
 
 		tick_lbl = tick_rng + part.peak_pos - Frame.winval(1) - 1;	% Tick labels %
 		xticklabels(ax, {tick_lbl(1,:)});
-		yticklabels(ax, {flip(tick_lbl(2,:))});
+		yticklabels(ax, {tick_lbl(2,:)});
 		
 		%% Scale Bar %%
 		if(part.visopt(1))
@@ -496,7 +507,7 @@ methods(Static)
 		stk_lbl = stk_rng + round(Particle.BND_PX(1)) + part.peak_pos(1) - 1;
 
 		xticklabels(ax, {stk_lbl});
-		yticklabels(ax, {flip(ptk_lbl)});
+		yticklabels(ax, {ptk_lbl});
 		
 		%% Visual Lines %%
 		% Scale Bar %
@@ -581,7 +592,7 @@ methods(Static)
 			leg{end+1} = "Selection";
 			
 			plot(ax, xgrid, part.spec_plots(:,2), '.', 'Color', [1, 0, 0]);
-			leg{end+1} = "Outliers";
+			leg{end+1} = "Background";
 		end
 		
 		% Show Signal %
@@ -613,8 +624,14 @@ methods(Static)
 			end
 			curves = [part.spec_fits.curves];
 			for c = 1:size(curves, 2)
-				plot(ax, xgrid, curves(:,c), '--', 'Color', color(c,:), ...
-					'LineWidth', 2, 'HandleVisibility', 'off');
+				if(size(color, 1) == 1)
+					plot(ax, xgrid, curves(:,c), '--', 'Color', color, ...
+						'LineWidth', 2, 'HandleVisibility', 'off');
+				else
+					plot(ax, xgrid, curves(:,c), '--', 'Color', color(c,:), ...
+						'LineWidth', 2, 'HandleVisibility', 'off');
+				end
+				
 			end
 			
 		end

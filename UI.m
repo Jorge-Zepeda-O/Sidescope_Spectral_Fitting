@@ -133,7 +133,7 @@ methods(Static)
 		if(nargin > 2)
 			menu.Callback = @(src, event) cb(mainwin, src, arg);
 		end
-		
+
 		% Call the callback if there's an option that this is modifying (given away
 		% by the fact that arg ~= 0)
 		if(arg ~= 0), cb(mainwin, menu, arg); end

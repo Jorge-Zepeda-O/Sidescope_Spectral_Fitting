@@ -33,8 +33,9 @@ menu_visopt = uimenu(MainWin, 'Text', 'Visualization');
 menu_opmode = uimenu(MainWin, 'Text', 'Operation Mode');
 	UI.MakeMenu(menu_opmode, "Illumination Correction", @menu_opmode_OnClick, 1, true);
 	UI.MakeMenu(menu_opmode, "Automate Background Subtraction (Experimental)", @menu_opmode_OnClick, 2);
-	UI.MakeMenu(menu_opmode, "Allow Lorentzian-Gaussian Hybridization", @menu_opmode_OnClick, 3, true, true);
+	UI.MakeMenu(menu_opmode, "Allow Lorentzian-Gaussian Hybridization", @menu_opmode_OnClick, 3, false, true);
 	UI.MakeMenu(menu_opmode, "Automate Peak Fitting (Experimental)", @menu_opmode_OnClick, 4, true);
+	UI.MakeMenu(menu_opmode, "Use Gaussian Selection Window", @menu_opmode_OnClick, 5, true);
 	
 % Make the axes we will be using %
 UI.MakeAxes(MainWin, [0.000, 0.225, 0.350, 0.800], "Original Image", ...
@@ -81,7 +82,7 @@ UI.MakeFrameSlider(MainWin, [0.05, 0.20, 0.30, 0.05], "Frame Control", ...
 UI.MakeParamSlider(MainWin, [0.40, 0.075, 0.15, 0.05], "Window Radius", ...
 	[5, 10, 15, 0.1, 0.2], @sld_winpara_OnValueChanged, 1, true, '%2.0f(px)');
 UI.MakeParamSlider(MainWin, [0.40, 0.025, 0.15, 0.05], ['Filter ', char(963)], ...
-	[1, 3, 6], @sld_winpara_OnValueChanged, 2, false, '%4.2f(px)');
+	[0.5, 1.5, 4], @sld_winpara_OnValueChanged, 2, false, '%4.2f(px)');
 
 % Sliders - Fit Parameters (Particle.fitval) %
 UI.MakeParamSlider(MainWin, [0.60, 0.175, 0.15, 0.05], "SNR Threshold", ...
@@ -709,10 +710,12 @@ function btn_exp_OnClick(parent, batch)
 		
 		save_folder_frame = [save_folder, parent.UserData.Frames(f).file_name(1:end-4), ...
 			'\Frame', sprintf("%d", f), '\'];
-		mkdir(save_folder_frame);
+		mkdir(join(save_folder_frame, ''));
 
 		% For each particle, export out... %
 		for p = 1:num_parts
+			delete(findall(gcf,'type','annotation'))
+			
 			% Position %
 			data(p).pos_peak = particles(p).peak_pos';
 
@@ -751,33 +754,65 @@ function btn_exp_OnClick(parent, batch)
 			ax = axes(fig, 'Units', 'pixels', 'Position', [300, 50, 680, 340]);
 			Particle.S_DispPlot(particles(p), ax);
 			
-			params = particles(p).spec_fits.params;
-			params = sortrows(params', 1, 'descend')';
-			if(~Particle.visopt(3))
-				params(3,:) = Particle.HC .* (1./(params(2,:)-params(3,:)/2) - 1./(params(2,:)+params(3,:)/2));
-				params(2,:) = Particle.HC ./ params(2,:);
-			end
-			ptbl = cell([4, size(params, 2)]);
-			for param = 1:size(params, 2)
-				ptbl{1,param} = char(sprintf("%5.1f%%", 100*params(1,param)));
-				if(Particle.visopt(3))
-					ptbl{2,param} = char(sprintf("%5.2f", params(2,param)));
-					ptbl{3,param} = char(sprintf("%5.2f", params(3,param)));
-				else
-					ptbl{2,param} = char(sprintf("%5.1f", params(2,param)));
-					ptbl{3,param} = char(sprintf("%5.1f", params(3,param)));
+			if(Frame.opmode(3))
+				params = particles(p).spec_fits.params;
+				params = sortrows(params', 1, 'descend')';
+				if(~Particle.visopt(3))
+					params(3,:) = Particle.HC .* (1./(params(2,:)-params(3,:)/2) - 1./(params(2,:)+params(3,:)/2));
+					params(2,:) = Particle.HC ./ params(2,:);
 				end
-				ptbl{4,param} = char(sprintf("%5.0f", params(4,param)));
-			end
-			
-			tbl = uitable(fig, 'Position', [20, 50, 200, 340], 'Data', ptbl');
-			if(Particle.visopt(3))
-				tbl.ColumnName = {char(951), [char(956), ' (eV)'], [char(915), ' (eV)'], 'A'};
+				ptbl = cell([4, size(params, 2)]);
+				for param = 1:size(params, 2)
+					ptbl{1,param} = char(sprintf("%5.1f%%", 100*params(1,param)));
+					if(Particle.visopt(3))
+						ptbl{2,param} = char(sprintf("%5.2f", params(2,param)));
+						ptbl{3,param} = char(sprintf("%5.2f", params(3,param)));
+					else
+						ptbl{2,param} = char(sprintf("%5.1f", params(2,param)));
+						ptbl{3,param} = char(sprintf("%5.1f", params(3,param)));
+					end
+					ptbl{4,param} = char(sprintf("%5.0f", params(4,param)));
+				end
+
+				tbl = uitable(fig, 'Position', [20, 50, 200, 340], 'Data', ptbl');
+				if(Particle.visopt(3))
+					tbl.ColumnName = {char(951), [char(956), ' (eV)'], [char(915), ' (eV)'], 'A'};
+				else
+					tbl.ColumnName = {char(951), [char(956), ' (nm)'], [char(915), ' (nm)'], 'A'};
+				end
+				tbl.ColumnWidth = {42};
+				tbl.FontName = 'Consolas';
 			else
-				tbl.ColumnName = {char(951), [char(956), ' (nm)'], [char(915), ' (nm)'], 'A'};
+				params = particles(p).spec_fits.params;
+				params = sortrows(params', 1, 'descend')';
+				if(~Particle.visopt(3))
+					params(2,:) = Particle.HC .* (1./(params(1,:)-params(2,:)/2) - 1./(params(1,:)+params(2,:)/2));
+					params(1,:) = Particle.HC ./ params(1,:);
+				end
+				ptbl = cell([4, size(params, 2)]);
+				for param = 1:size(params, 2)
+					if(Particle.visopt(3))
+						ptbl{1,param} = char(sprintf("%5.2f", params(1,param)));
+						ptbl{2,param} = char(sprintf("%5.2f", params(2,param)));
+					else
+						ptbl{1,param} = char(sprintf("%5.1f", params(1,param)));
+						ptbl{2,param} = char(sprintf("%5.1f", params(2,param)));
+					end
+					ptbl{3,param} = char(sprintf("%5.0f", params(3,param)));
+				end
+
+				tbl = uitable(fig, 'Position', [20, 50, 200, 340], 'Data', ptbl');
+				if(Particle.visopt(3))
+					tbl.ColumnName = {[char(956), ' (eV)'], [char(915), ' (eV)'], 'A'};
+				else
+					tbl.ColumnName = {[char(956), ' (nm)'], [char(915), ' (nm)'], 'A'};
+				end
+				tbl.ColumnWidth = {42};
+				tbl.FontName = 'Consolas';
 			end
-			tbl.ColumnWidth = {42};
-			tbl.FontName = 'Consolas';
+			annotation('textbox', [0.02, 0.65, 0.2, 0.04], ...
+				'String', sprintf("SNR: %5.2f", particles(p).snr), ...
+				'edgecolor', 'none', 'horizontalalignment', 'center');
 				
 % 			uicontrol(fig, 'Style', 'text', 'FontSize', 12, 'String', ...
 % 				join([char(951), "=", sprintf("%5.2f%% | ", 100*particles(p).spec_fits.params(1,:))]), ...
@@ -809,16 +844,15 @@ function btn_exp_OnClick(parent, batch)
 % 				 'Units', 'pixels', 'Position', [40, 240, 180, 20]);
 			
 			drawnow limitrate;
-			savefig(fig, [save_folder_frame, ...
-				sprintf('(%d,%d)', particles(p).peak_pos(1), particles(p).peak_pos(2))], 'compact');
-			saveas(fig, [save_folder_frame, ...
-				sprintf('(%d,%d)', particles(p).peak_pos(1), particles(p).peak_pos(2)), ...
-				'.png']);
+			savefig(fig, join([save_folder_frame, sprintf('(%d,%d)', ...
+				particles(p).peak_pos(1), particles(p).peak_pos(2))], ''), 'compact');
+			saveas(fig, join([save_folder_frame, sprintf('(%d,%d)', ...
+				particles(p).peak_pos(1), particles(p).peak_pos(2)), '.png'], ''));
 			%close(fig);
 		end
 
 		% Write data to File (Currently overwrites) %
-		save([save_folder_frame, 'Found Particles.mat'], 'data');
+		save(join([save_folder_frame, 'Found Particles.mat'], ''), 'data');
 
 		disp(join(["Successfully Exported", num_parts, "Spectra..."]));
 	end

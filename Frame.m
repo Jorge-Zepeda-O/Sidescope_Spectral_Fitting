@@ -208,6 +208,28 @@ methods
 		% Compute the mean of means %
 		this.spec_bg = mean(slice_valid, 2);
 	end
+	function PickSpectrumBG(this, xrng, filt_wgt)
+		this.spec_bg = zeros([length(xrng), length(this.Particles)]);
+		
+		for p = 1:length(this.Particles)
+			axes(UI.axs(4));
+			title(sprintf("Please select background for particle %d", p));
+			
+			Particle.S_DispSpec(this.Particles(p))
+			%ax = UI.axs(3);
+			bg_pos = round(ginput(1));
+			yrng = this.Particles(p).peak_pos(2) - bg_pos(2) + ...
+				(-Frame.winval(1):Frame.winval(1));
+			
+			this.spec_bg(:,p) = this.img(yrng, xrng)' * filt_wgt(:,1);
+			%figure()
+			%imagesc(this.img(yrng, xrng))
+			%line(ax, [xrng(1),xrng(end)]-xrng(1), bg_pos(2)*[1,1]-Frame.winval(2), 'color', 'k', 'linewidth', 4);
+			%line(ax, [xrng(1),xrng(end)]-xrng(1), bg_pos(2)*[1,1], 'color',  'g', 'linewidth', 4);
+			%line(ax, [xrng(1),xrng(end)]-xrng(1), bg_pos(2)*[1,1]+Frame.winval(2), 'color',  'k', 'linewidth', 4);
+		end
+		Particle.S_DispSpec(this.Particles(1))
+	end
 	
 	function SelectROI(this, roi)
 	% This function prompts the user to select a Region of Interest (ROI) of the
@@ -309,7 +331,7 @@ methods
 			% Slice a region of this image close to this particle.  We select pixels
 			% in an entire range of y so everything related to spectrum processing 
 			% can be contained in the Particle class.
-			peak_yrng = (-rad_win:rad_win) + peak_pos(p,2);
+			peak_yrng = (-rad_win:rad_win) + peak_pos(p,2) + 3 - round(peak_pos(p,2)/300);
 			
 			% Pass in the particle's peak position and the image slice %
 			part = Particle(peak_pos(p,:), this.img(peak_yrng, :));
@@ -343,6 +365,23 @@ methods
 	function FitROI(this, wb)
 	% Function that fits all particles in the ROI with multiple peaks.  In the
 	% process
+		%% Create Filters %%
+		% Make the selection, background, and total filters %
+		ygrid = (-Frame.winval(1):Frame.winval(1))';	% Grid along the y-axis %
+		yoff = 0;
+
+		if(Frame.opmode(5))
+			filt_wgt = exp(- (ygrid-yoff).^2 / (2*Frame.winval(2)^2)); % Gaussian Filter %
+		else
+			filt_wgt = abs(ygrid) <= Frame.winval(2);
+		end
+		%filt_oth = 1 - filt_sel;							% Inverse-Gaussian Filter %
+		
+		%filt_wgt = [filt_sel, filt_oth];	% Combine together for simplicity %
+
+		% Normalize the Filters %
+		filt_wgt = filt_wgt ./ sum(filt_wgt);
+	
 		%% Image Analysis %%		
 		% Get the noise power, which is just its variance in what we didn't detect %
 		pow_noise = var(this.img(this.img < this.thr_det));
@@ -355,25 +394,17 @@ methods
 		
 		% Calculate the spectrum background.  This is complicated, so look at the
 		% relevant function.
-		this.GetSpectrumBG(xrng, pow_noise);
-		
-		%% Create Filters %%
-		% Make the selection, background, and total filters %
-		ygrid = (-Frame.winval(1):Frame.winval(1))';	% Grid along the y-axis %
-		yoff = 0;
-
-		filt_sel = exp(- (ygrid-yoff).^2 / (2*Frame.winval(2)^2)); % Gaussian Filter %
-		filt_oth = 1 - filt_sel;							% Inverse-Gaussian Filter %
-		
-		filt_wgt = [filt_sel, filt_oth];	% Combine together for simplicity %
-
-		% Normalize the Filters %
-		filt_wgt = filt_wgt ./ sum(filt_wgt, 1);
+		if(this.opmode(2))
+			this.GetSpectrumBG(xrng, pow_noise);
+			this.spec_bg = kron(this.spec_bg, ones([1,length(this.Particles)]));
+		else
+			this.PickSpectrumBG(xrng, filt_wgt);
+		end
 		
 		%% Fit each Spectrum %%
 		for p = 1:length(this.Particles)	
 			% Call the spectrum fitting function for this particle %
-			this.Particles(p).Fit_Spectrum(filt_wgt, xrng, this.spec_bg, pow_noise);
+			this.Particles(p).Fit_Spectrum(filt_wgt, xrng, this.spec_bg(:,p), pow_noise);
 			
 			% Update the waitbar %
 			waitbar(wb.UserData(2)/wb.UserData(3), wb, ...

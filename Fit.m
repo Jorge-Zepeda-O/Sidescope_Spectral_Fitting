@@ -153,11 +153,10 @@ methods
 		this.curves = all_fit_sep{best};
 	end
 	function Fit_Peaks(this, peakfxn, err, num, manual)
-	% Fits multiple ('num') Gaurentzians to the data provided in 'err' and stores it
-	% in this instance's 'curves' and 'params' properties.  The metric for
-	% determining how many fits are ideal is based on the coefficient of
-	% determination R^2.  We seek for the best total fit while minimizing the number
-	% of Gaurentzians in that fit.
+	% Fits multiple ('num') peaks to the data provided in 'err' and stores it in this
+	% instance's 'curves' and 'params' properties.  The metric for determining how 
+	% many fits are ideal is based on the coefficient of determination R^2.  We seek 
+	% for the best total fit while minimizing the number of peaks in that fit.
 	%
 	%	------------------------------------------------------------------------
 	%	Argument Defaults:
@@ -306,16 +305,22 @@ methods(Static)
 		
 		% Establish the bounds and initial value of the nonlinear fit %
 		switch(fit_fxn)
-			case "Lorentzian"	% [mu, fwhm, (A), (b)] %
+			case "Gaussian"		% [mu, sigma, (A), (b)] %
 				bnd_min = [min(x);	0;				amp_min;	min(y)];
 				bnd_max = [max(x);	range(x);		amp_max;	max(y)];
-				ini_val = [mean(x);	range(x)/4;		mean(y);	0];
+				ini_val = [mean(x);	sqrt(range(x));	mean(y);	0];
+				fit_fxn = @Fit.Fxn_Gaussian;
+				
+			case "Lorentzian"	% [mu, Gamma, (A), (b)] %
+				bnd_min = [min(x);	0;				amp_min;	min(y)];
+				bnd_max = [max(x);	range(x);		amp_max;	max(y)];
+				ini_val = [mean(x);	range(x)/8;		mean(y);	0];
 				fit_fxn = @Fit.Fxn_Lorentzian;
 				
 			case "Gaurentzian"	% [eta, mu, fwhm, (A), (b)] %
 				bnd_min = [0;	min(x);		0;				amp_min;	min(y)];
 				bnd_max = [1;	max(x);		range(x);		amp_max;	max(y)];
-				ini_val = [0.5;	mean(x);	range(x)/4;		mean(y);	0];
+				ini_val = [0.5;	mean(x);	range(x)/8;		mean(y);	0];
 				fit_fxn = @Fit.Fxn_Gaurentzian;
 		end
 		% Make these the same across all fits %
@@ -334,8 +339,8 @@ methods(Static)
 		end
 		
 		%% Nonlinear Least Squares Fitting %%
-		% Perform a nonlinear least-squares fit on the Lorentzian Function to find
-		% the parameters of best fit.
+		% Perform a nonlinear least-squares fit on the peak function to find the 
+		% parameters of best fit.
 		params = lsqnonlin( @(p) sum(fit_fxn(p, x, y), 2), ...
 			ini_val(1:p_len, :), bnd_min(1:p_len, :), bnd_max(1:p_len, :), lsqopt);
 		
@@ -350,6 +355,51 @@ methods(Static)
 	end
 	
 	%% FUNCTIONS %%
+	function [res] = Fxn_Gaussian(p, x, y)
+	% Computes the value of a linear combination of multiple Gaussians defined by
+	% parameters 'p' over domain 'x'.  May also compute the difference with some
+	% values 'y' to establish a residual 'res'.
+	%
+	% The Gaussian function is modeled as:
+	%	G(x) = A * exp(- (x - mu).^2 / (2*sigma.^2) ) + b
+	%
+	% where A is the amplitude of the Gaussian, mu is the peak position, sigma is the
+	% standard deviation of the Gaussian, and b is the vertical offset.  These
+	% parameters are presented in [mu, sigma, A, b] order to allow for construction
+	% unit-amplitude Gaussians with ease.
+	% 
+	%	--------------------------------------------------------------------
+	%	Argument Definitions:
+	%	> p:	[mu, sigma, A, b] The parameters that define each Gaussian.
+	%
+	%	> x:	[#] The values to evaluate the Gaussians at
+	%
+	%	~ y:	[#] The values to compare the Gaussians to, must be the same
+	%		dimensions as 'x'
+	%			(~) Default: 0
+	%
+	%	--------------------------------------------------------------------
+	%	Outputs:
+	%	< res:	[#] The values of the Gaussian that was evaluated
+	%			[#]	The error with the compared values given in 'y'
+	
+		%% Argument Defaults %%
+		if(nargin < 3), y = zeros(size(x)); end
+	
+		%% Compute the Gaussian %%
+		% Compute the base Gaussian (position & standard deviation) %
+		res = exp( -(x - p(1,:)).^2 ./(2*p(2,:).^2) );
+		
+		% If applicable, introduce separate scaling factors %
+		if(size(p, 1) > 2), res = res .* p(3,:); end
+		
+		% If applicable, introduce separate offsets %
+		if(size(p, 1) > 3), res = res + p(4,:); end
+		
+		%% Determine Residual %%
+		% Subtract out the values to compare the Gaussians to, if any %
+		res = res - y/size(p,2);
+	end
 	function [res] = Fxn_Lorentzian(p, x, y)
 	% Computes the value of a Lorentzian defined by parameters 'p' at each value 
 	% of 'x'.  May also compute the difference with some values 'y' to establish
@@ -425,7 +475,7 @@ methods(Static)
 	%
 	%	--------------------------------------------------------------------
 	%	Outputs:
-	%	< res:	[#] The values of the Lorentzian that was evaluated
+	%	< res:	[#] The values of the Gaurentzian that was evaluated
 	%			[#]	The error with the compared values given in 'y'
 	
 		%% Argument Defaults %%
@@ -454,6 +504,7 @@ methods(Static)
 		% Subtract out the values to compare the Gaurentzians to, if any %
 		res = res - y/size(p,2);
 	end
+	
 end
 
 end
