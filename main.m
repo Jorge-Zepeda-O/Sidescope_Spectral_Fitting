@@ -23,18 +23,18 @@ menu_file = uimenu(MainWin, 'Text', 'File');
 	
 menu_visopt = uimenu(MainWin, 'Text', 'Visualization');
 	UI.MakeMenu(menu_visopt, "Show Scale Bars", @menu_visopt_OnClick, 1, true);
-	UI.MakeMenu(menu_visopt, "Show Selection Filter Guides", @menu_visopt_OnClick, 2, false);
+	UI.MakeMenu(menu_visopt, "Show Selection Filter Guides", @menu_visopt_OnClick, 2, true);
 	UI.MakeMenu(menu_visopt, "Use eVs", @menu_visopt_OnClick, 3, false, true);
 	UI.MakeMenu(menu_visopt, "Show Selection & Outliers", @menu_visopt_OnClick, 4, true);
 	UI.MakeMenu(menu_visopt, "Show Signal Spectrum", @menu_visopt_OnClick, 5, true);
-	UI.MakeMenu(menu_visopt, "Show Fit Decomposition", @menu_visopt_OnClick, 6, true);
-	UI.MakeMenu(menu_visopt, "Show Hybridization Colors", @menu_visopt_OnClick, 7, true);
+	UI.MakeMenu(menu_visopt, "Show Fit Decomposition", @menu_visopt_OnClick, 6, false);
+	UI.MakeMenu(menu_visopt, "Show Hybridization Colors", @menu_visopt_OnClick, 7, false);
 	
 menu_opmode = uimenu(MainWin, 'Text', 'Operation Mode');
 	UI.MakeMenu(menu_opmode, "Illumination Correction", @menu_opmode_OnClick, 1, true);
 	UI.MakeMenu(menu_opmode, "Automate Background Subtraction (Experimental)", @menu_opmode_OnClick, 2);
 	UI.MakeMenu(menu_opmode, "Allow Lorentzian-Gaussian Hybridization", @menu_opmode_OnClick, 3, false, true);
-	UI.MakeMenu(menu_opmode, "Automate Peak Fitting (Experimental)", @menu_opmode_OnClick, 4, true);
+	UI.MakeMenu(menu_opmode, "Automate Peak Fitting (Experimental)", @menu_opmode_OnClick, 4, false);
 	UI.MakeMenu(menu_opmode, "Use Gaussian Selection Window", @menu_opmode_OnClick, 5, true);
 	
 % Make the axes we will be using %
@@ -82,7 +82,7 @@ UI.MakeFrameSlider(MainWin, [0.05, 0.20, 0.30, 0.05], "Frame Control", ...
 UI.MakeParamSlider(MainWin, [0.40, 0.075, 0.15, 0.05], "Window Radius", ...
 	[5, 10, 15, 0.1, 0.2], @sld_winpara_OnValueChanged, 1, true, '%2.0f(px)');
 UI.MakeParamSlider(MainWin, [0.40, 0.025, 0.15, 0.05], ['Filter ', char(963)], ...
-	[0.5, 1.5, 4], @sld_winpara_OnValueChanged, 2, false, '%4.2f(px)');
+	[1/3, 3/2, 10/3, 1/60, 1/9], @sld_winpara_OnValueChanged, 2, false, '%4.2f(px)');
 
 % Sliders - Fit Parameters (Particle.fitval) %
 UI.MakeParamSlider(MainWin, [0.60, 0.175, 0.15, 0.05], "SNR Threshold", ...
@@ -90,7 +90,7 @@ UI.MakeParamSlider(MainWin, [0.60, 0.175, 0.15, 0.05], "SNR Threshold", ...
 UI.MakeParamSlider(MainWin, [0.60, 0.125, 0.15, 0.05], "SNR Band", ...
 	[0.5, 1, 3, 1/25, 1/5], @sld_fitpara_OnValueChanged, 2, false, '%3.1f');
 UI.MakeParamSlider(MainWin, [0.60, 0.075, 0.15, 0.05], "Peaks", ...
-	[1, 2, 5, 0.25, 0.5], @sld_fitpara_OnValueChanged, 3, true, '%1.0f');
+	[1, 1, 5, 0.25, 0.5], @sld_fitpara_OnValueChanged, 3, true, '%1.0f');
 
 % List Boxes %
 UI.MakeListbox(MainWin, [0.38, 0.30, 0.13, 0.40], "Found Particles", ...
@@ -225,7 +225,11 @@ function menu_visopt_OnClick(parent, obj, arg)
 	if(~isfield(parent.UserData, 'Frames')), return; end
 	
 	% Get the currently active frame %
-	activeFrame = parent.UserData.Frames(Frame.actidx);
+	if(isempty(Frame.actidx))
+		activeFrame = parent.UserData.Frames(1);
+	else
+		activeFrame = parent.UserData.Frames(Frame.actidx);
+	end
 	
 	% Display the currently selected particle's fit and spectrum - if applicable %
 	if(~isempty(activeFrame.Particles))
@@ -326,7 +330,11 @@ function sld_frame_OnValueChanged(parent, obj, numlbl)
 	numlbl.String = join(["Frame:", val]);
 	
 	% Get the active Frame (as we won't be modifying it any more) %
-	activeFrame = parent.UserData.Frames(Frame.actidx);
+	if(isempty(Frame.actidx))
+		activeFrame = parent.UserData.Frames(1);
+	else
+		activeFrame = parent.UserData.Frames(Frame.actidx);
+	end
 	
 	% Draw the new Frame %
 	activeFrame.DispImg();	% 'Original Image' axes %
@@ -418,7 +426,11 @@ function sld_winpara_OnValueChanged(parent, obj, numlbl)
 	
 	% To clarify things, and because we're not mutating anything, copy down the
 	% active Frame
-	activeFrame = parent.UserData.Frames(Frame.actidx);
+	if(isempty(Frame.actidx))
+		activeFrame = parent.UserData.Frames(1);
+	else
+		activeFrame = parent.UserData.Frames(Frame.actidx);
+	end
 	
 	% Check to make sure that the Particles field exists; if it doesn't exist, then
 	% don't do anything - you don't need to.
@@ -592,7 +604,11 @@ function btn_sel_OnClick(parent, batch)
 	
 	%% UI Update %%	
 	% We're not modifying the active frame anymore, so make a copy for convienence %
-	activeFrame = parent.UserData.Frames(Frame.actidx);
+	if(isempty(Frame.actidx))
+		activeFrame = parent.UserData.Frames(1);
+	else
+		activeFrame = parent.UserData.Frames(Frame.actidx);
+	end
 	
 	% Update the Listbox title %
 	UI.Ctrl_Set("ttllbx: Found Particles", UI.ctrls, 'String', ...
@@ -675,7 +691,11 @@ function btn_fit_OnClick(parent, batch)
 	
 	%% UI Update %%
 	% Get the currently active frame and particle %
-	activeFrame = parent.UserData.Frames(Frame.actidx);
+	if(isempty(Frame.actidx))
+		activeFrame = parent.UserData.Frames(1);
+	else
+		activeFrame = parent.UserData.Frames(Frame.actidx);
+	end
 	activeParticle = activeFrame.Particles(activeFrame.actPar);
 	
 	% Display the currently selected fit %
@@ -718,13 +738,18 @@ function btn_exp_OnClick(parent, batch)
 			
 			% Position %
 			data(p).pos_peak = particles(p).peak_pos';
-
+			data(p).pos_spec = particles(p).peak_pos(2) + particles(p).spec_off;
+			data(p).pos_bg = particles(p).bg_pos;
+			
 			% Images %
 			data(p).img_peak = particles(p).peak_img;
 			data(p).img_spec = particles(p).spec_img;
-
+			
+			% Background %
+			data(p).img_bg = particles(p).bg_img;
+			
 			% Find out where the peak is, pixel wise %
-			[~, data(p).idx_spec] = max(sum(particles(p).spec_img(7:13,:), 2));
+			%[~, data(p).idx_spec] = max(sum(particles(p).spec_img(7:13,:), 2));
 
 			% Plots %
 			data(p).plt_sel = particles(p).spec_plots(:,1);
@@ -735,6 +760,9 @@ function btn_exp_OnClick(parent, batch)
 			data(p).fit_domain = [Particle.RNG_NM, Particle.RNG_EV];
 			data(p).fit_curves = [particles(p).spec_fits.curves];
 			data(p).fit_params = [particles(p).spec_fits.params];
+			
+			% Other info %
+			data(p).snr = particles(p).snr;
 			
 			% Figure %
 			if(~exist('fig', 'var'))
@@ -882,7 +910,11 @@ function lbx_found_OnValueChanged(parent, obj)
 	
 	%% UI Update %%
 	% Get the currently active Frame %
-	activeFrame = parent.UserData.Frames(Frame.actidx);
+	if(isempty(Frame.actidx))
+		activeFrame = parent.UserData.Frames(1);
+	else
+		activeFrame = parent.UserData.Frames(Frame.actidx);
+	end
 	
 	% Update the box colors on the main image %
 	activeFrame.Particles(preVal).DispBox();				% Color red %

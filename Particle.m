@@ -87,19 +87,23 @@ properties
 	peak_img	% [x, y]	Image at the peak within a small surrounding window %
 
 	%% Spectrum %%
-	spec_img	% [x, y]	Image at the spectrum with a small surrounding window %
+	spec_img	% [[x, y]]	Image at the spectrum with a small surrounding window %
+	spec_off
 	
-	spec_plots	% [sel, oth, sig]	Various parts of the integrated spectrum % 
+	spec_plots	% [sel, bg, sig]	Various parts of the integrated spectrum % 
 	spec_fits	% [Fit]		Array of Fit objects corresponding to Lorentzians %
 	
 	pow_noise	% (#)	Value of the noise power
+	snr			% (#)	Signal to Noise Ratio: SNR = A / std(sig - fit)
+	
+	%% Background %%
+	bg_pos		% (y)	Background Position %
+	bg_img		% [[x, y]]	Image at the spectrum with a small surrounding window %
 	
 	%% Display %%
 	peak_lines	% [line] Array of lines that define the box around the peak image %
 	spec_lines	% [line] Array of lines that define the box around the spectrum img %
 	filt_lines	% [line] Array of lines that show where the selection box is %
-	
-	snr
 end
 
 %% DEPENDENT VARIABLES %%
@@ -117,7 +121,7 @@ end
 methods
 	%%%%%% STILL NEEDS WORK %%%%
 	%% CONSTRUCTOR %%
-	function [obj] = Particle(peak_pos, img_slice)
+	function [obj] = Particle(peak_pos, img, slice)
 	% Constructs a Particle object centered at position 'peak_pos' and with a slice
 	% of the Frame image 'img' around this peak position.
 	%	------------------------------------------------------------------------
@@ -137,9 +141,17 @@ methods
 		% Make the peak range - use the window radius option %
 		peak_rng = -Frame.winval(1):Frame.winval(1);
 
+		slice_ext = slice(1)-5 : slice(end)+5;
+		specwin = img(slice_ext, Particle.RNG_PX + obj.peak_pos(1));
+		specline = sum(specwin, 2)' .* exp(-1/2 * ((slice_ext - mean(slice_ext))/(Frame.winval(1))).^2);
+		%figure()
+		%plot(slice_ext - mean(slice_ext), specline)
+		[~, spec_off] = max(specline);
+		obj.spec_off = floor(spec_off - range(slice_ext)/2) - 1;
+		
 		% Get the image chunks %
-		obj.peak_img = img_slice(:, peak_rng + obj.peak_pos(1));
-		obj.spec_img = img_slice(:, Particle.RNG_PX + obj.peak_pos(1));
+		obj.peak_img = img(slice, peak_rng + obj.peak_pos(1));
+		obj.spec_img = img(slice + obj.spec_off, Particle.RNG_PX + obj.peak_pos(1));
 	end
 	
 	%% METHODS %%
@@ -481,7 +493,6 @@ methods(Static)
 		%% Preliminaries %%
 		% Create the tick range %
 		ptk_rng = (0:5:2*Frame.winval(1)) + 1;
-		
 		stk_rng = 1:10:ceil(range(Particle.BND_PX));
 		
 		%% Plotting %%
@@ -503,7 +514,7 @@ methods(Static)
 		xticks(ax, stk_rng);									% Tick marks %
 		yticks(ax, ptk_rng);
 		
-		ptk_lbl = ptk_rng + part.peak_pos(2) - Frame.winval(1) - 1;	% Tick labels %
+		ptk_lbl = ptk_rng + part.peak_pos(2) - Frame.winval(1) - 1 + part.spec_off;	% Tick labels %
 		stk_lbl = stk_rng + round(Particle.BND_PX(1)) + part.peak_pos(1) - 1;
 
 		xticklabels(ax, {stk_lbl});
@@ -522,13 +533,17 @@ methods(Static)
 		
 		% Filter Lines %
 		if(part.visopt(2))
-			line_colors = ['g', 'y', 'r'];
-			line_styles = ["-", "--", ":"];
-			for l = -2:2
+			line_styles = ["-", "--"];
+			for l = -1:1
 				line(ax, size(part.spec_img,2)*[0,1], ...
-					(Frame.winval(1)+1) + l*Frame.winval(2)*[1,1], ...
-					'Color', line_colors(abs(l)+1), 'LineStyle', line_styles(abs(l)+1), ...
+					(Frame.winval(1)+1) + 2*l*Frame.winval(2)*[1,1], ...
+					'Color', 'k', 'LineStyle', line_styles(abs(l)+1), ...
 					'LineWidth', 2-abs(l)/2);
+				if(~isempty(part.bg_pos))
+					line(ax, size(part.spec_img,2)*[0,1], ...
+						(part.bg_pos-Frame.winval(1)) + 2*l*Frame.winval(2)*[1,1], ...
+						'Color', 'r', 'LineStyle', line_styles(abs(l)+1), 'LineWidth', 2)
+				end
 			end
 		end
 	end

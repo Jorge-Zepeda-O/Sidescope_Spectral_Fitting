@@ -211,24 +211,59 @@ methods
 	function PickSpectrumBG(this, xrng, filt_wgt)
 		this.spec_bg = zeros([length(xrng), length(this.Particles)]);
 		
+		lower = -round(2*Frame.winval(1)+3*Frame.winval(2));
+		upper =  round(2*Frame.winval(1)+3*Frame.winval(2));
+		
 		for p = 1:length(this.Particles)
+			%axes(UI.axs(4));
 			axes(UI.axs(4));
+			yrng = this.Particles(p).peak_pos(2) + this.Particles(p).spec_off + (lower:upper);
+			imagesc(this.img(yrng, xrng));
+			% Guides %
+			hold on;
+			fill([0,0,1,1]*217, 3*Frame.winval(2)*[0,1,1,0], ...
+				'r', 'facealpha', 0.3);
+			fill([0,0,1,1]*217, 3*Frame.winval(2)*[-1,1,1,-1]+upper, ...
+				'r', 'facealpha', 0.3);
+			fill([0,0,1,1]*217, 3*Frame.winval(2)*[-1,0,0,-1]+(2*upper+1), ...
+				'r', 'facealpha', 0.3);
+			hold off;
 			title(sprintf("Please select background for particle %d", p));
 			
-			Particle.S_DispSpec(this.Particles(p))
-			%ax = UI.axs(3);
+			%Particle.S_DispSpec(this.Particles(p))
 			bg_pos = round(ginput(1));
-			yrng = this.Particles(p).peak_pos(2) - bg_pos(2) + ...
+			bg_pos = bg_pos(2);
+			bgrng = this.Particles(p).peak_pos(2) - (upper+1) + bg_pos + ...
 				(-Frame.winval(1):Frame.winval(1));
+			this.spec_bg(:,p) = this.img(bgrng, xrng)' * filt_wgt(:,1);
 			
-			this.spec_bg(:,p) = this.img(yrng, xrng)' * filt_wgt(:,1);
+			this.Particles(p).bg_pos = bg_pos;
+			this.Particles(p).bg_img = this.img(bgrng, xrng);
+			
+			%figure()
+			%subplot(3,1,[1,2])
+			%imagesc(this.img(yrng, xrng));
+			%line([1, range(xrng)], bg_pos*[1,1], 'color', 'r')
+			%line([1, range(xrng)], bg_pos*[1,1]+2*Frame.winval(2), 'color', 'r', 'linestyle', '--')
+			%line([1, range(xrng)], bg_pos*[1,1]-2*Frame.winval(2), 'color', 'r', 'linestyle', '--')
+			%line([1, range(xrng)], bg_pos*[1,1]+Frame.winval(1), 'color', 'r', 'linestyle', ':')
+			%line([1, range(xrng)], bg_pos*[1,1]-Frame.winval(1), 'color', 'r', 'linestyle', ':')
+			
+			%line([1, range(xrng)], upper*[1,1]+1, 'color', 'k')
+			%line([1, range(xrng)], upper*[1,1]+1+2*Frame.winval(2), 'color', 'k', 'linestyle', '--')
+			%line([1, range(xrng)], upper*[1,1]+1-2*Frame.winval(2), 'color', 'k', 'linestyle', '--')
+			
+			%subplot(3,1,3)
+			%imagesc(this.Particles(p).bg_img);
+			
 			%figure()
 			%imagesc(this.img(yrng, xrng))
 			%line(ax, [xrng(1),xrng(end)]-xrng(1), bg_pos(2)*[1,1]-Frame.winval(2), 'color', 'k', 'linewidth', 4);
 			%line(ax, [xrng(1),xrng(end)]-xrng(1), bg_pos(2)*[1,1], 'color',  'g', 'linewidth', 4);
 			%line(ax, [xrng(1),xrng(end)]-xrng(1), bg_pos(2)*[1,1]+Frame.winval(2), 'color',  'k', 'linewidth', 4);
+			if(p ~= length(this.Particles)), Particle.S_DispSpec(this.Particles(p)); end
 		end
-		Particle.S_DispSpec(this.Particles(1))
+		Particle.S_DispSpec(this.Particles(1));
 	end
 	
 	function SelectROI(this, roi)
@@ -309,6 +344,7 @@ methods
 		% care of non-peaks, and the img_sig has taken care of any points below the
 		% signal threshold.  These are our peak positions.
 		[peak_pos(:,2), peak_pos(:,1)] = ind2sub(size(roi_sig), find(roi_sig));
+		peak_pos = sortrows(peak_pos, 2);
 		
 		% Then simply translate the peak positions to the image coordinates %
 		peak_pos = peak_pos + roi(1:2);		% Once again, blame MATLAB %
@@ -331,10 +367,10 @@ methods
 			% Slice a region of this image close to this particle.  We select pixels
 			% in an entire range of y so everything related to spectrum processing 
 			% can be contained in the Particle class.
-			peak_yrng = (-rad_win:rad_win) + peak_pos(p,2) + 3 - round(peak_pos(p,2)/300);
+			peak_yrng = (-rad_win:rad_win) + peak_pos(p,2);
 			
 			% Pass in the particle's peak position and the image slice %
-			part = Particle(peak_pos(p,:), this.img(peak_yrng, :));
+			part = Particle(peak_pos(p,:), this.img, peak_yrng);
 			
 			% Drop the particle if it's not the maximum in its own box %
 			if(max(part.peak_img(:)) ~= max(max(part.peak_img( ...
@@ -373,7 +409,7 @@ methods
 		if(Frame.opmode(5))
 			filt_wgt = exp(- (ygrid-yoff).^2 / (2*Frame.winval(2)^2)); % Gaussian Filter %
 		else
-			filt_wgt = abs(ygrid) <= Frame.winval(2);
+			filt_wgt = abs(ygrid) <= 2*Frame.winval(2);	% 95% confidence %
 		end
 		%filt_oth = 1 - filt_sel;							% Inverse-Gaussian Filter %
 		

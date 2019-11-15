@@ -306,20 +306,20 @@ methods(Static)
 		% Establish the bounds and initial value of the nonlinear fit %
 		switch(fit_fxn)
 			case "Gaussian"		% [mu, sigma, (A), (b)] %
-				bnd_min = [min(x);	0;				amp_min;	min(y)];
-				bnd_max = [max(x);	range(x);		amp_max;	max(y)];
+				bnd_min = [min(x);	0;				amp_min;	0];
+				bnd_max = [max(x);	range(x);		amp_max;	0];
 				ini_val = [mean(x);	sqrt(range(x));	mean(y);	0];
 				fit_fxn = @Fit.Fxn_Gaussian;
 				
 			case "Lorentzian"	% [mu, Gamma, (A), (b)] %
-				bnd_min = [min(x);	0;				amp_min;	min(y)];
-				bnd_max = [max(x);	range(x);		amp_max;	max(y)];
+				bnd_min = [min(x);	0;				amp_min;	0];
+				bnd_max = [max(x);	range(x);		amp_max;	0];
 				ini_val = [mean(x);	range(x)/8;		mean(y);	0];
 				fit_fxn = @Fit.Fxn_Lorentzian;
 				
 			case "Gaurentzian"	% [eta, mu, fwhm, (A), (b)] %
-				bnd_min = [0;	min(x);		0;				amp_min;	min(y)];
-				bnd_max = [1;	max(x);		range(x);		amp_max;	max(y)];
+				bnd_min = [0;	min(x);		0;				amp_min;	0];
+				bnd_max = [1;	max(x);		range(x);		amp_max;	0];
 				ini_val = [0.5;	mean(x);	range(x)/8;		mean(y);	0];
 				fit_fxn = @Fit.Fxn_Gaurentzian;
 		end
@@ -327,6 +327,13 @@ methods(Static)
 		bnd_min = bnd_min * ones([1, num]);
 		bnd_max = bnd_max * ones([1, num]);
 		ini_val = ini_val * ones([1, num]);
+		
+		[~, ymax] = max(y);
+		if(size(ini_val, 1) == 5)
+			ini_val(2,1) = x(ymax);
+		else
+			ini_val(1,1) = x(ymax);
+		end
 		
 		% If an initial value for the parameters is given, use that %
 		if(sum(abs(p_0(:))) > 0)
@@ -432,6 +439,14 @@ methods(Static)
 		%% Argument Defaults %%
 		if(nargin < 3), y = zeros(size(x)); end
 	
+		if(size(p,1) ~= 4)
+			p = p';
+		elseif(size(p,2) == 4)
+			if(sum(p(:,4) == 0) ~= size(p,1))
+				p = p';
+			end
+		end
+		
 		%% Compute the Lorentzian %%
 		% Compute the base Lorentizan (position & FWHM) %
 		res = 1 ./ ((2*(x - p(1,:))./p(2,:)).^2 + 1);
