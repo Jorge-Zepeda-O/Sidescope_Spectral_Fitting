@@ -1,6 +1,8 @@
 # Sidescope_Spectral_Fitting
 MATLAB code allowing for spectral analysis using the Landes Lab's Sidescope - Based on existing code written for the group.
 
+No longer being worked on as the project was scrapped.
+
 CHANGELOG:
 -- v0.5.5:
 
